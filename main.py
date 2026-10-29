@@ -61,7 +61,7 @@ def check_init(raw: str):
 
 hits = {}
 @web.middleware
-async def mw(req, h):
+async def mw(req, handler):
     if req.method == "OPTIONS": r = web.Response()
     else:
         if req.path.startswith("/api/") and req.path != "/api/catalog":
@@ -71,7 +71,7 @@ async def mw(req, h):
             k = u["id"]; now = time.time()  # rate limit: 30 so'rov/daqiqa
             hits[k] = [x for x in hits.get(k, []) if now - x < 60] + [now]
             if len(hits[k]) > 30: return web.json_response({"error": "rate"}, status=429, headers=cors())
-        r = await h(req)
+        r = await handler(req)
     r.headers.update(cors()); return r
 def cors(): return {"Access-Control-Allow-Origin": C.ORIGIN, "Access-Control-Allow-Headers": "Content-Type,X-Init", "Access-Control-Allow-Methods": "GET,POST,OPTIONS"}
 
