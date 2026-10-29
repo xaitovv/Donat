@@ -27,7 +27,6 @@ function menu(){const u=S.u,tgu=tg?.initDataUnsafe?.user||{};
   return `<div class="top"><div class="av">${tgu.photo_url?`<img src="${tgu.photo_url}">`:(tgu.first_name||"?")[0]}</div><div><b>${tgu.first_name||""}</b><br><small style="color:var(--mut)">${tgu.username?"@"+tgu.username:""}</small></div></div>
   <div class="bal"><small>${t("balance")}</small><h2>${fmt(u.balance)} <span>${t("cur")}</span></h2>
   <div class="row3"><div class="glass" onclick="go('topup')">💳<br>${t("topup")}</div><div class="glass" onclick="alert(t('nopromo'))">🎟<br>${t("bonus")}</div><div class="glass" onclick="tg&&tg.openTelegramLink('https://t.me/'+S.cat.support)">💬<br>${t("support")}</div></div></div>
-  <div class="promo"><h3>🔥 ${t("special")} · FREE FIRE</h3><div class="timer"><div>2<small>${t("d")}</small></div><div>09<small>${t("h")}</small></div><div>24<small>${t("m")}</small></div><div>33<small>${t("s")}</small></div></div><button class="white" onclick="openGame('freefire')">🎮 Free Fire →</button></div>
   <div class="seg"><a class="${S.tab=="games"?"on":""}" onclick="S.tab='games';render()">${t("games")}</a><a class="${S.tab=="gift"?"on":""}" onclick="S.tab='gift';render()">Gift Code</a><a class="${S.tab=="ai"?"on":""}" onclick="S.tab='ai';render()">🤖 AI</a></div>${body}`}
 function openGame(id){S.game=S.cat.games.find(g=>g.id==id);S.sel=null;S.pid="";S.checked=false;S.ptab=Object.keys(S.game.tabs)[0];go("game")}
 function game(){const g=S.game;if(!g)return"";
