@@ -19,3 +19,13 @@ def find_item(game_id, item_id):
                     if i["id"] == item_id:
                         return g, i
     return None, None
+
+RATE = float(os.getenv("RUB_RATE", "0.108"))  # 1 RUB = RATE somoni
+DC_PHONE = os.getenv("DC_PHONE", "")
+DC_HOLDER = os.getenv("DC_HOLDER", HOLDER)
+# Faqat DC Next (chek bilan). Telefon DC_PHONE da; bo'lmasa CARD_NUMBER ishlatiladi.
+PAY = []
+if DC_PHONE:
+    PAY.append({"id": "dc", "name": "DC Next", "type": "phone", "value": DC_PHONE, "holder": DC_HOLDER, "cur": "TJS", "color": "#e8590c", "icon": "DC"})
+elif CARD:
+    PAY.append({"id": "dc", "name": "DC Next", "type": "card", "value": CARD, "holder": HOLDER, "cur": "TJS", "color": "#e8590c", "icon": "DC"})
