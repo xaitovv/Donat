@@ -119,6 +119,10 @@ async def history(r):
     n = [{"title": x["title"], "amount": x["amount"], "date": f(x["ts"])} for x in D.q("SELECT * FROM fin WHERE uid=? ORDER BY id DESC LIMIT 50", (uid,))]
     return web.json_response({"orders": o, "fin": n})
 
+def _img(path):
+    async def h(r):
+        return web.FileResponse(path) if os.path.exists(path) else web.Response(status=404)
+    return h
 async def main():
     app = web.Application(middlewares=[mw], client_max_size=8 * 1024 * 1024)
     app.add_routes([web.get("/api/catalog", catalog), web.get("/api/me", me), web.post("/api/lang", lang), web.post("/api/order", order),
@@ -126,6 +130,8 @@ async def main():
                     web.get("/", lambda r: web.FileResponse(os.path.join(HERE, "index.html")))])
     for f in ("style.css", "app.js", "i18n.js", "ru.json", "uz.json", "tg.json", "en.json", "logo.png", "splash.jpg"):
         app.router.add_get("/" + f, lambda r, f=f: web.FileResponse(os.path.join(HERE, f)))
+    for g in C.CATALOG["games"]:
+        app.router.add_get("/" + g["id"] + ".png", _img(os.path.join(HERE, g["id"] + ".png")))
     run = web.AppRunner(app); await run.setup(); await web.TCPSite(run, "0.0.0.0", C.PORT).start()
     await dp.start_polling(bot)
 if __name__ == "__main__":

@@ -20,8 +20,9 @@ function render(){
   $("#nav").innerHTML=NAV.map(([k,i,n])=>`<a class="${v==k||(k=="menu"&&sub)?"on":""}" onclick="go('${k}')"><i>${i}</i>${t(n)}</a>`).join("");
   if(tg)tg.BackButton[sub?"show":"hide"]()}
 tg?.BackButton.onClick(()=>go("menu"));
+const gi=g=>`<img class="gimg" src="/${g.id}.png?v=3" onerror="this.style.display='none'">`;
 function menu(){const u=S.u,tgu=tg?.initDataUnsafe?.user||{};
-  const games=S.cat.games.map(g=>`<div class="game" onclick="openGame('${g.id}')"><i style="background:${g.color}">${g.icon}</i>${g.name}</div>`).join("");
+  const games=S.cat.games.map(g=>`<div class="game" onclick="openGame('${g.id}')"><i style="background:${g.color}">${gi(g)}${g.icon}</i>${g.name}</div>`).join("");
   const gifts=(S.cat.gifts||[]).map(g=>`<div class="li"><div><b>${g.name}</b><br><small style="color:var(--mut)">${g.sub}</small></div>›</div>`).join("");
   const ai=(S.cat.ai||[]).map(g=>`<div class="pk"><b>${g.name}</b><span>${g.price} c.</span></div>`).join("");
   const body=S.tab=="games"?`<div class="grid3">${games}</div>`:S.tab=="gift"?`<div class="card">${gifts}</div>`:`<div class="grid3" style="grid-template-columns:1fr 1fr">${ai}</div>`;
@@ -33,7 +34,7 @@ function openGame(id){S.game=S.cat.games.find(g=>g.id==id);S.sel=null;S.pid="";S
 function game(){const g=S.game;if(!g)return"";
   const tabs=Object.keys(g.tabs),items=g.tabs[S.ptab]||[];
   const regs=g.regions?`<div class="card"><div class="lbl">${t("region")}</div><div class="reg">${g.regions.map(r=>`<a class="${S.region==r?"on":""}" onclick="S.region='${r}';render()">${r}</a>`).join("")}</div></div>`:"";
-  return `<div class="card top" style="margin:0 0 14px"><div class="av" style="background:${g.color};border-radius:14px">${g.icon}</div><div><b>${g.name}</b><br><small style="color:var(--mut)">${g.sub}</small></div></div>
+  return `<div class="card top" style="margin:0 0 14px"><div class="av" style="background:${g.color};border-radius:14px;position:relative">${gi(g)}${g.icon}</div><div><b>${g.name}</b><br><small style="color:var(--mut)">${g.sub}</small></div></div>
   <div class="card"><div class="lbl">${t("playerid")}</div>${S.checked?`<div class="li" style="padding:6px 0"><b class="ok">✓ ${S.pid}</b><a onclick="S.checked=false;render()" style="color:var(--mut)">${t("change")}</a></div>`:`<div class="flex"><input id="pid" inputmode="numeric" placeholder="${t("enterid")}" value="${S.pid}"><button class="btn" style="width:auto;padding:0 18px" onclick="chk()">${t("check")}</button></div>`}</div>
   ${regs}<div class="lbl">${t("pick")}</div><div class="seg">${tabs.map(k=>`<a class="${S.ptab==k?"on":""}" onclick="S.ptab='${k}';S.sel=null;render()">${k}</a>`).join("")}</div>
   <div class="grid3" style="grid-template-columns:1fr 1fr">${items.map(i=>`<div class="pk ${S.sel==i.id?"on":""}" onclick="S.sel='${i.id}';render()">${i.off?`<em>-${i.off}%</em>`:""}<b>${i.name}</b><span>${i.price} ${t("cur")}</span></div>`).join("")}</div>
