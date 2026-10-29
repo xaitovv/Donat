@@ -1,10 +1,10 @@
-import asyncio, hmac, hashlib, json, time
+import asyncio, base64, hmac, hashlib, json, time
 from urllib.parse import parse_qsl
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart, CommandObject
 from aiogram.types import (Message, CallbackQuery, InlineKeyboardMarkup,
-                           InlineKeyboardButton, WebAppInfo)
+                           InlineKeyboardButton, WebAppInfo, BufferedInputFile)
 import config as C, database as D
 
 import os
@@ -75,7 +75,7 @@ async def mw(req, handler):
     r.headers.update(cors()); return r
 def cors(): return {"Access-Control-Allow-Origin": C.ORIGIN, "Access-Control-Allow-Headers": "Content-Type,X-Init", "Access-Control-Allow-Methods": "GET,POST,OPTIONS"}
 
-async def catalog(r): return web.json_response({**C.CATALOG, "bot": (await bot.me()).username, "support": C.SUPPORT})
+async def catalog(r): return web.json_response({**C.CATALOG, "bot": (await bot.me()).username, "support": C.SUPPORT, "rate": C.RATE, "pay": [{k: x[k] for k in ("id", "name", "type", "cur", "color", "icon")} for x in C.PAY]})
 async def me(r):
     u = r["u"]; n = D.q("SELECT COUNT(*) c FROM users WHERE invited_by=?", (u["id"],)).fetchone()["c"]
     b = D.q("SELECT COUNT(*) c FROM users WHERE invited_by=? AND paid=1", (u["id"],)).fetchone()["c"]
@@ -95,10 +95,24 @@ async def order(r):
     await bot.send_message(C.ADMIN_ID, f"🛒 #{oid}\n{title}\nID: {pid}\nUser: {r['u']['id']}", reply_markup=kb)
     return web.json_response({"ok": True, "balance": round(D.user(r["u"]["id"])["balance"], 2)})
 async def topup(r):
-    a = float((await r.json()).get("amount", 0))
-    if not 5 <= a <= 5000: return web.json_response({"error": "bad"})
+    d = await r.json()
+    try: a = float(d.get("amount", 0))
+    except Exception: a = 0
+    x = next((p for p in C.PAY if p["id"] == d.get("method")), None)
+    if not x or not 10 <= a <= 5000: return web.json_response({"error": "bad"})
     tid = D.q("INSERT INTO topups(uid,amount) VALUES(?,?)", (r["u"]["id"], a)).lastrowid
-    return web.json_response({"ok": True, "id": tid, "amount": a, "card": C.CARD, "holder": C.HOLDER})
+    pa = a if x["cur"] == "TJS" else round(a / C.RATE)
+    return web.json_response({"ok": True, "id": tid, "amount": a, "pay": pa, "cur": x["cur"], "type": x["type"], "value": x["value"], "holder": x["holder"], "name": x["name"], "icon": x["icon"], "color": x["color"], "method": x["id"]})
+async def receipt_api(r):
+    d = await r.json(); uid = r["u"]["id"]
+    t = D.q("SELECT * FROM topups WHERE id=? AND uid=? AND status='pending'", (d.get("id"), uid)).fetchone()
+    try: raw = base64.b64decode(str(d.get("image", "")).split(",")[-1], validate=True)
+    except Exception: raw = b""
+    if not t or not 1000 < len(raw) < 6_000_000 or not (raw[:3] == b"\xff\xd8\xff" or raw[:4] == b"\x89PNG"):
+        return web.json_response({"error": "bad"})
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✅", callback_data=f"ok{t['id']}"), InlineKeyboardButton(text="❌", callback_data=f"no{t['id']}")]])
+    await bot.send_photo(C.ADMIN_ID, BufferedInputFile(raw, "receipt.jpg"), caption=f"💳 Top up #{t['id']}\nUser: {uid}\n{t['amount']} TJS\nMethod: {str(d.get('method', ''))[:20]}", reply_markup=kb)
+    return web.json_response({"ok": True})
 async def history(r):
     uid = r["u"]["id"]; f = lambda x: str(x)[:16]
     o = [{"id": x["id"], "title": x["title"], "price": x["price"], "status": x["status"], "date": f(x["ts"])} for x in D.q("SELECT * FROM orders WHERE uid=? ORDER BY id DESC LIMIT 50", (uid,))]
@@ -106,9 +120,9 @@ async def history(r):
     return web.json_response({"orders": o, "fin": n})
 
 async def main():
-    app = web.Application(middlewares=[mw])
+    app = web.Application(middlewares=[mw], client_max_size=8 * 1024 * 1024)
     app.add_routes([web.get("/api/catalog", catalog), web.get("/api/me", me), web.post("/api/lang", lang), web.post("/api/order", order),
-                    web.post("/api/topup", topup), web.get("/api/history", history), web.route("OPTIONS", "/{p:.*}", lambda r: web.Response()),
+                    web.post("/api/topup", topup), web.post("/api/receipt", receipt_api), web.get("/api/history", history), web.route("OPTIONS", "/{p:.*}", lambda r: web.Response()),
                     web.get("/", lambda r: web.FileResponse(os.path.join(HERE, "index.html")))])
     for f in ("style.css", "app.js", "i18n.js", "ru.json", "uz.json", "tg.json", "en.json", "logo.png", "splash.jpg"):
         app.router.add_get("/" + f, lambda r, f=f: web.FileResponse(os.path.join(HERE, f)))

@@ -15,7 +15,7 @@ async function init(){
   if(localStorage.getItem("light"))document.body.classList.add("light");
   render();setTimeout(()=>$("#splash").classList.add("hide"),Math.max(0,5000-(Date.now()-T0)))}
 function render(){
-  const v=S.view,m={menu,game,topup,hist,friends,set,pay:payv},sub=["game","topup","pay"].includes(v);
+  const v=S.view,m={menu,game,topup,meth,hist,friends,set,pay:payv},sub=["game","topup","meth","pay"].includes(v);
   $("#app").innerHTML=m[v]();
   $("#nav").innerHTML=NAV.map(([k,i,n])=>`<a class="${v==k||(k=="menu"&&sub)?"on":""}" onclick="go('${k}')"><i>${i}</i>${t(n)}</a>`).join("");
   if(tg)tg.BackButton[sub?"show":"hide"]()}
@@ -42,12 +42,36 @@ function chk(){const v=$("#pid").value.trim();if(!/^\d{5,14}$/.test(v)){S.pid=v;
 async function buy(){const r=await api("/api/order",{game:S.game.id,item:S.sel,pid:S.pid,region:S.region});
   if(r?.error=="funds"){alert(t("nofunds"));return go("topup")}
   if(r?.ok){S.u.balance=r.balance;alert(t("ordered"));go("hist")}else alert(t("err"))}
-function topup(){return `<h1 style="margin:10px 0 20px">${t("topup")}</h1><div class="lbl">${t("amount")}</div><div class="grid3">${[10,20,50,100,200,500].map(a=>`<div class="pk" style="text-align:center" onclick="$('#amt').value=${a}"><b>${a}</b></div>`).join("")}</div>
-  <div class="card" style="margin-top:14px"><input id="amt" type="number" placeholder="0"></div><button class="btn" onclick="mkTop()">${t("continue")}</button>`}
-async function mkTop(){const a=+$("#amt").value;if(a<5)return;const r=await api("/api/topup",{amount:a});if(r?.ok){S.pay=r;go("pay")}else alert(t("err"))}
-function payv(){const p=S.pay||{};return `<h1 style="margin:10px 0 20px">${t("topup")}</h1><div class="card" style="text-align:center"><div class="lbl">${t("sendto")}</div><h1>${p.amount} ${t("cur")}</h1>
-  <div class="card" style="margin-top:14px;text-align:left"><div class="lbl">${t("card")}</div><b style="font-size:20px">${p.card||""}</b><br><small style="color:var(--mut)">${p.holder||""}</small></div></div>
-  <div class="card">${t("payinfo")} #${p.id}</div><button class="btn" onclick="tg?tg.close():go('menu')">${t("sentbtn")}</button>`}
+const rate=()=>S.cat.rate||0.108;
+function toast(m){const d=document.createElement("div");d.textContent=m;d.style.cssText="position:fixed;top:70px;left:50%;transform:translateX(-50%);background:#22c993;color:#fff;padding:10px 18px;border-radius:14px;z-index:20;font-weight:700";document.body.appendChild(d);setTimeout(()=>d.remove(),1500)}
+function cp(v){navigator.clipboard?.writeText(String(v).replace(/\s/g,""));toast(t("copied"))}
+function topup(){const a=S.amt||"",R=rate();
+  return `<h1 style="margin:10px 0 20px">${t("topup")}</h1><div class="lbl">${t("amount")}</div>
+  <div class="grid3">${[10,20,50,100,200,500].map(x=>`<div class="pk" style="text-align:center" onclick="setAmt(${x})"><b>${x} ${t("cur")}</b></div>`).join("")}</div>
+  <div class="card" style="margin-top:14px;padding:0;overflow:hidden"><div class="flex" style="gap:0"><div style="flex:1;display:flex;align-items:center;padding:6px 14px"><input id="amS" type="number" inputmode="decimal" placeholder="0" value="${a}" oninput="fromS()" style="border:0;background:none;padding:10px 0"><small style="color:var(--mut);font-weight:700">${t("cur")}</small></div><div style="width:1px;background:var(--line)"></div><div style="flex:1;display:flex;align-items:center;padding:6px 14px"><input id="amR" type="number" inputmode="decimal" placeholder="0" value="${a?Math.round(a/R):""}" oninput="fromR()" style="border:0;background:none;padding:10px 0"><small style="color:var(--mut);font-weight:700">₽</small></div></div>
+  <div style="text-align:center;padding:10px;background:var(--card2);color:var(--mut);font-size:12px;font-weight:700">1 ₽ = ${R} ${t("cur")}</div></div>
+  <button class="btn" onclick="toMeth()">${t("continue")} →</button>`}
+function setAmt(x){S.amt=x;$("#amS").value=x;$("#amR").value=Math.round(x/rate())}
+function fromS(){const v=+$("#amS").value;S.amt=v;$("#amR").value=v?Math.round(v/rate()):""}
+function fromR(){const v=+$("#amR").value;S.amt=v?Math.round(v*rate()*100)/100:0;$("#amS").value=S.amt||""}
+function toMeth(){if(!(S.amt>=10))return alert(t("min")+" 10 "+t("cur"));go("meth")}
+function meth(){const rows=(S.cat.pay||[]).map(m=>{const amt=m.cur=="RUB"?Math.round(S.amt/rate())+" ₽":fmt(S.amt)+" "+t("cur");
+  return `<div class="card" style="display:flex;justify-content:space-between;align-items:center;padding:14px 16px" onclick="pickM('${m.id}')"><div class="flex" style="align-items:center"><div class="av" style="background:${m.color};border-radius:14px">${m.icon}</div><div><b>${m.name}</b><br><small style="color:var(--mut)">${t(m.type=="card"?"bycard":"byphone")}</small></div></div><div style="text-align:right"><b style="color:#8b7bff">${amt}</b> ›</div></div>`}).join("");
+  return `<a style="color:#8b7bff;font-weight:600" onclick="go('topup')">‹ ${t("changeamt")}</a><div class="lbl" style="margin-top:18px">${t("paymethod")}</div>${rows||`<p style="color:var(--mut)">—</p>`}`}
+async function pickM(id){const r=await api("/api/topup",{amount:S.amt,method:id});if(r?.ok){S.pay=r;S.file=null;go("pay")}else alert(t("err"))}
+function payv(){const p=S.pay||{};
+  return `<a style="color:#8b7bff;font-weight:600" onclick="go('meth')">‹ ${t("changemeth")}</a>
+  <div class="card" style="margin-top:14px;text-align:center"><div class="lbl">${t("payto")}</div><div class="av" style="background:${p.color};border-radius:18px;width:72px;height:72px;margin:6px auto 14px;font-size:26px">${p.icon}</div>
+  <h1 onclick="cp(S.pay.pay)" style="font-size:40px">${p.pay} <span style="color:#8b7bff;font-size:20px">${p.cur=="RUB"?"₽":t("cur")}</span> 📋</h1><small style="color:var(--mut)">${t("tapcopy")}</small>
+  <div class="card" style="margin:16px 0 0;text-align:left;background:var(--bg);display:flex;justify-content:space-between;align-items:center"><div><div class="lbl" style="margin:0 0 6px">${t(p.type=="card"?"cardno":"phoneno")}</div><b style="font-size:20px">${p.value}</b><br><small style="color:var(--mut)">${p.holder}</small></div><div class="av" style="background:var(--card2);border-radius:50%" onclick="cp(S.pay.value)">📋</div></div></div>
+  <div style="text-align:center;color:var(--mut);margin:18px 0 10px">— ${t("afterpay")} —</div>
+  <div class="card"><b>${t("uploadrc")}</b><label style="display:block;margin-top:14px;border:2px dashed var(--line);border-radius:18px;padding:26px;text-align:center;color:var(--mut)"><input type="file" accept="image/jpeg,image/png" style="display:none" onchange="pickF(this)">${S.file?`<b class="ok">✓ ${S.file.name}</b>`:`📷<br><b>${t("photo")}</b><br><small>JPG, PNG — 5MB</small>`}</label></div>
+  <button class="btn" ${S.file?"":"disabled"} onclick="sendRc()">✅ ${t("sendconfirm")}</button>`}
+function pickF(el){const f=el.files[0];if(!f)return;if(f.size>5*1024*1024)return alert("5MB");S.file=f;render()}
+function toJpeg(f){return new Promise((ok,no)=>{const im=new Image();im.onload=()=>{const k=Math.min(1,1280/Math.max(im.width,im.height)),c=document.createElement("canvas");c.width=im.width*k;c.height=im.height*k;c.getContext("2d").drawImage(im,0,0,c.width,c.height);ok(c.toDataURL("image/jpeg",.8))};im.onerror=no;im.src=URL.createObjectURL(f)})}
+async function sendRc(){const b=document.querySelector(".btn");b.disabled=true;
+  try{const img=await toJpeg(S.file);const r=await api("/api/receipt",{id:S.pay.id,method:S.pay.method,image:img});
+    if(r?.ok){alert(t("rcpt_ok"));S.file=null;S.amt=0;go("menu")}else{alert(t("err"));b.disabled=false}}catch(e){alert(t("err"));b.disabled=false}}
 function hist(){const H=S.hist;
   const o=S.htab=="orders"?H.orders.map(x=>`<div class="card li"><div><b>${x.title}</b><br><small style="color:var(--mut)">#${x.id} · ${x.date}</small></div><div style="text-align:right"><b>${x.price} ${t("cur")}</b><br><small class="ok">${x.status}</small></div></div>`).join(""):H.fin.map(x=>`<div class="card li"><div><b>${x.title}</b><br><small style="color:var(--mut)">${x.date}</small></div><b class="${x.amount>0?"ok":"bad"}">${x.amount>0?"+":""}${x.amount} ${t("cur")}</b></div>`).join("");
   return `<h1 style="margin:10px 0">${t("history")}</h1><div class="seg"><a class="${S.htab=="orders"?"on":""}" onclick="S.htab='orders';render()">${t("orders")}</a><a class="${S.htab=="fin"?"on":""}" onclick="S.htab='fin';render()">${t("finance")}</a></div>${o||`<p style="color:var(--mut);text-align:center;margin-top:40px">—</p>`}`}
