@@ -1,4 +1,5 @@
 const API=""; // bir xil server
+const T0=Date.now();
 const tg=window.Telegram?.WebApp;tg?.ready();tg?.expand();
 const $=s=>document.querySelector(s);
 const S={u:{balance:0,spent:0,ref:"",refs:0,bonus:0},cat:{games:[],bot:"",support:""},tab:"games",view:"menu",game:null,sel:null,pid:"",region:"GLOBAL",hist:{orders:[],fin:[]},htab:"orders"};
@@ -12,7 +13,7 @@ async function init(){
   if(me&&!me.error){S.u=me;if(me.lang&&me.lang!==LANG)await setLang(me.lang)}
   if(cat)S.cat=cat;
   if(localStorage.getItem("light"))document.body.classList.add("light");
-  render();setTimeout(()=>$("#splash").classList.add("hide"),900)}
+  render();setTimeout(()=>$("#splash").classList.add("hide"),Math.max(0,5000-(Date.now()-T0)))}
 function render(){
   const v=S.view,m={menu,game,topup,hist,friends,set,pay:payv},sub=["game","topup","pay"].includes(v);
   $("#app").innerHTML=m[v]();

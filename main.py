@@ -110,7 +110,7 @@ async def main():
     app.add_routes([web.get("/api/catalog", catalog), web.get("/api/me", me), web.post("/api/lang", lang), web.post("/api/order", order),
                     web.post("/api/topup", topup), web.get("/api/history", history), web.route("OPTIONS", "/{p:.*}", lambda r: web.Response()),
                     web.get("/", lambda r: web.FileResponse(os.path.join(HERE, "index.html")))])
-    for f in ("style.css", "app.js", "i18n.js", "ru.json", "uz.json", "tg.json", "en.json"):
+    for f in ("style.css", "app.js", "i18n.js", "ru.json", "uz.json", "tg.json", "en.json", "logo.png", "splash.jpg"):
         app.router.add_get("/" + f, lambda r, f=f: web.FileResponse(os.path.join(HERE, f)))
     run = web.AppRunner(app); await run.setup(); await web.TCPSite(run, "0.0.0.0", C.PORT).start()
     await dp.start_polling(bot)
