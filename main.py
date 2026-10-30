@@ -1,3 +1,4 @@
+import html as H
 import asyncio, base64, hmac, hashlib, json, time
 from urllib.parse import parse_qsl
 from aiohttp import web
@@ -39,13 +40,58 @@ async def decide(c: CallbackQuery):
         D.q("UPDATE topups SET status='rejected' WHERE id=? AND status='pending'", (tid,))
     await c.message.edit_reply_markup(); await c.answer("OK")
 
+import html as H
+CUR = {"ru": "сомони", "uz": "somoni", "tg": "сомонӣ", "en": "TJS"}
+LINE = "━━━━━━━━━━━━━━━━━━"
+T = {
+ "tg": dict(
+  acc="✅ <b>Фармоиши шумо қабул шуд!</b>\n\n📦 Маҳсулот: <b>{item}</b>\n🆔 ID: {pid}\n🏷 Фармоиш: #{oid}\n\n⏳ Иҷро мешавад, лутфан интизор шавед.\nТайёр шуд, хабар мефиристем! 🎮",
+  done="🎉 <b>Фармоиши шумо иҷро шуд!</b>\n" + LINE + "\n🎮 Бозӣ: <b>{game}</b>\n📦 Маҳсулот: <b>{item}</b>\n🆔 ID бозингар: {pid}{nick}\n💰 Пардохт шуд: <b>{price} {cur}</b>\n🏷 Фармоиш: <b>#{oid}</b>\n" + LINE + "\n\nТашаккур барои харид! 🙏\n\n⭐ <b>Хизматро баҳо диҳед:</b>",
+  nick="\n🎭 Никнейм: <b>{v}</b>", thx="Ташаккур барои баҳо! {s}"),
+ "ru": dict(
+  acc="✅ <b>Ваш заказ принят!</b>\n\n📦 Товар: <b>{item}</b>\n🆔 ID: {pid}\n🏷 Заказ: #{oid}\n\n⏳ Выполняется, пожалуйста, подождите.\nКак только будет готово — сообщим! 🎮",
+  done="🎉 <b>Ваш заказ выполнен!</b>\n" + LINE + "\n🎮 Игра: <b>{game}</b>\n📦 Товар: <b>{item}</b>\n🆔 ID игрока: {pid}{nick}\n💰 Оплачено: <b>{price} {cur}</b>\n🏷 Заказ: <b>#{oid}</b>\n" + LINE + "\n\nСпасибо за покупку! 🙏\n\n⭐ <b>Оцените сервис:</b>",
+  nick="\n🎭 Никнейм: <b>{v}</b>", thx="Спасибо за оценку! {s}"),
+ "uz": dict(
+  acc="✅ <b>Buyurtmangiz qabul qilindi!</b>\n\n📦 Mahsulot: <b>{item}</b>\n🆔 ID: {pid}\n🏷 Buyurtma: #{oid}\n\n⏳ Bajarilmoqda, iltimos kuting.\nTayyor bo'lgach, xabar beramiz! 🎮",
+  done="🎉 <b>Buyurtmangiz bajarildi!</b>\n" + LINE + "\n🎮 O'yin: <b>{game}</b>\n📦 Mahsulot: <b>{item}</b>\n🆔 O'yinchi ID: {pid}{nick}\n💰 To'landi: <b>{price} {cur}</b>\n🏷 Buyurtma: <b>#{oid}</b>\n" + LINE + "\n\nXaridingiz uchun rahmat! 🙏\n\n⭐ <b>Xizmatni baholang:</b>",
+  nick="\n🎭 Nikneym: <b>{v}</b>", thx="Bahoyingiz uchun rahmat! {s}"),
+ "en": dict(
+  acc="✅ <b>Your order has been accepted!</b>\n\n📦 Product: <b>{item}</b>\n🆔 ID: {pid}\n🏷 Order: #{oid}\n\n⏳ In progress, please wait.\nWe will notify you when it is ready! 🎮",
+  done="🎉 <b>Your order is complete!</b>\n" + LINE + "\n🎮 Game: <b>{game}</b>\n📦 Product: <b>{item}</b>\n🆔 Player ID: {pid}{nick}\n💰 Paid: <b>{price} {cur}</b>\n🏷 Order: <b>#{oid}</b>\n" + LINE + "\n\nThank you for your purchase! 🙏\n\n⭐ <b>Rate our service:</b>",
+  nick="\n🎭 Nickname: <b>{v}</b>", thx="Thanks for rating! {s}"),
+}
+def lang_of(uid):
+    u = D.q("SELECT lang FROM users WHERE id=?", (uid,)).fetchone()
+    return u["lang"] if u and u["lang"] in T else "ru"
+async def notify(uid, kind, o, nick=""):
+    l = lang_of(uid); t = T[l]; e = H.escape
+    nk = t["nick"].format(v=e(nick)) if nick else ""
+    text = t[kind].format(item=e(o["item"] or o["title"]), game=e(o["game"] or ""), pid=e(str(o["pid"])), oid=o["id"], price=f"{o['price']:.2f}", cur=CUR[l], nick=nk)
+    kb = None
+    if kind == "done":
+        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=f"{n}⭐", callback_data=f"rt{o['id']}_{n}") for n in range(1, 6)]])
+    try: await bot.send_message(uid, text, parse_mode="HTML", reply_markup=kb)
+    except Exception: pass
+
 @dp.callback_query(F.data.startswith("done"))
 async def done(c: CallbackQuery):
     if c.from_user.id != C.ADMIN_ID: return await c.answer()
-    oid = int(c.data[4:]); D.q("UPDATE orders SET status='done' WHERE id=?", (oid,))
-    o = D.q("SELECT uid FROM orders WHERE id=?", (oid,)).fetchone()
-    await bot.send_message(o["uid"], f"✅ Order #{oid}")
+    oid = int(c.data[4:])
+    if D.q("UPDATE orders SET status='done' WHERE id=? AND status='pending'", (oid,)).rowcount:
+        o = D.q("SELECT * FROM orders WHERE id=?", (oid,)).fetchone()
+        await notify(o["uid"], "done", o)
     await c.message.edit_reply_markup(); await c.answer("OK")
+
+@dp.callback_query(F.data.regexp(r"^rt\d+_[1-5]$"))
+async def rate(c: CallbackQuery):
+    oid, n = map(int, c.data[2:].split("_"))
+    o = D.q("SELECT * FROM orders WHERE id=? AND uid=? AND status='done'", (oid, c.from_user.id)).fetchone()
+    if o and D.q("INSERT OR IGNORE INTO ratings(oid,uid,stars) VALUES(?,?,?)", (oid, c.from_user.id, n)).rowcount:
+        await c.message.edit_reply_markup()
+        await c.message.answer(T[lang_of(c.from_user.id)]["thx"].format(s="⭐" * n))
+        await bot.send_message(C.ADMIN_ID, f"⭐ {n}/5 — #{oid}")
+    await c.answer()
 
 # ---------- API ----------
 def check_init(raw: str):
@@ -89,10 +135,11 @@ async def order(r):
     pid = str(d.get("pid", ""))
     if not i or not pid.isdigit(): return web.json_response({"error": "bad"})
     title = f"{g['name']} {i['name']}" + (f" [{d.get('region')}]" if g.get("regions") else "")
-    oid = D.buy(r["u"]["id"], title, pid, i["price"])  # narx serverdan olinadi
+    oid = D.buy(r["u"]["id"], title, pid, i["price"], g["name"], i["name"])  # narx serverdan olinadi
     if not oid: return web.json_response({"error": "funds"})
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✅ Done", callback_data=f"done{oid}")]])
     await bot.send_message(C.ADMIN_ID, f"🛒 #{oid}\n{title}\nID: {pid}\nUser: {r['u']['id']}", reply_markup=kb)
+    await notify(r["u"]["id"], "acc", D.q("SELECT * FROM orders WHERE id=?", (oid,)).fetchone())
     return web.json_response({"ok": True, "balance": round(D.user(r["u"]["id"])["balance"], 2)})
 async def topup(r):
     d = await r.json()

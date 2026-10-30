@@ -6,8 +6,12 @@ db.executescript("""
 CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY,name TEXT,lang TEXT DEFAULT 'ru',balance REAL DEFAULT 0,spent REAL DEFAULT 0,ref TEXT,invited_by INTEGER,paid INTEGER DEFAULT 0,bonus REAL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS orders(id INTEGER PRIMARY KEY AUTOINCREMENT,uid INTEGER,title TEXT,pid TEXT,price REAL,status TEXT DEFAULT 'pending',ts DATETIME DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS topups(id INTEGER PRIMARY KEY AUTOINCREMENT,uid INTEGER,amount REAL,status TEXT DEFAULT 'pending',ts DATETIME DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS ratings(oid INTEGER PRIMARY KEY,uid INTEGER,stars INTEGER);
 CREATE TABLE IF NOT EXISTS fin(id INTEGER PRIMARY KEY AUTOINCREMENT,uid INTEGER,title TEXT,amount REAL,ts DATETIME DEFAULT CURRENT_TIMESTAMP);
 """)
+for _c in ("game", "item"):
+    try: db.execute(f"ALTER TABLE orders ADD COLUMN {_c} TEXT DEFAULT ''")
+    except sqlite3.OperationalError: pass
 def q(sql, a=()):
     with _l: return db.execute(sql, a)
 def user(uid, name="", inviter=None):
@@ -18,14 +22,14 @@ def user(uid, name="", inviter=None):
         q("INSERT INTO users(id,name,ref,invited_by) VALUES(?,?,?,?)", (uid, name, secrets.token_urlsafe(6).upper(), inv))
         u = q("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
     return u
-def buy(uid, title, pid, price):
+def buy(uid, title, pid, price, game="", item=""):
     """Atomik: balans yetarli bo'lsa yechadi (ikki marta yechilishdan himoya)."""
     with _l:
         db.execute("BEGIN IMMEDIATE")
         r = db.execute("UPDATE users SET balance=balance-?,spent=spent+? WHERE id=? AND balance>=?", (price, price, uid, price))
         if r.rowcount == 0:
             db.execute("ROLLBACK"); return None
-        oid = db.execute("INSERT INTO orders(uid,title,pid,price) VALUES(?,?,?,?)", (uid, title, pid, price)).lastrowid
+        oid = db.execute("INSERT INTO orders(uid,title,pid,price,game,item) VALUES(?,?,?,?,?,?)", (uid, title, pid, price, game, item)).lastrowid
         db.execute("INSERT INTO fin(uid,title,amount) VALUES(?,?,?)", (uid, title, -price))
         db.execute("COMMIT"); return oid
 def approve_topup(tid, pct):
