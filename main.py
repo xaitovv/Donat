@@ -228,6 +228,8 @@ async def main():
         app.router.add_get("/" + f, lambda r, f=f: web.FileResponse(os.path.join(HERE, f)))
     for g in C.CATALOG["games"]:
         app.router.add_get("/" + g["id"] + ".png", _img(os.path.join(HERE, g["id"] + ".png")))
+    for x in C.PAY:
+        app.router.add_get("/" + x["id"] + ".png", _img(os.path.join(HERE, x["id"] + ".png")))
     run = web.AppRunner(app); await run.setup(); await web.TCPSite(run, "0.0.0.0", C.PORT).start()
     await dp.start_polling(bot)
 if __name__ == "__main__":
