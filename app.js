@@ -15,7 +15,7 @@ async function init(){
   if(localStorage.getItem("light"))document.body.classList.add("light");
   render();if(new URLSearchParams(location.search).get("go")=="hist")go("hist");setTimeout(()=>$("#splash").classList.add("hide"),Math.max(0,3000-(Date.now()-T0)))}
 function render(){
-  const v=S.view,m={menu,game,topup,meth,hist,friends,set,pay:payv},sub=["game","topup","meth","pay"].includes(v);
+  const v=S.view,m={menu,game,topup,meth,hist,friends,set,rev,pay:payv},sub=["game","topup","meth","pay","rev"].includes(v);
   $("#app").innerHTML=m[v]();
   $("#nav").innerHTML=NAV.map(([k,i,n])=>`<a class="${v==k||(k=="menu"&&sub)?"on":""}" onclick="go('${k}')"><i>${i}</i>${t(n)}</a>`).join("");
   if(tg)tg.BackButton[sub?"show":"hide"]()}
@@ -29,6 +29,7 @@ function menu(){const u=S.u,tgu=tg?.initDataUnsafe?.user||{};
   return `<div class="top"><div class="av">${tgu.photo_url?`<img src="${tgu.photo_url}">`:(tgu.first_name||"?")[0]}</div><div><b>${tgu.first_name||""}</b><br><small style="color:var(--mut)">${tgu.username?"@"+tgu.username:""}</small></div></div>
   <div class="bal"><small>${t("balance")}</small><h2>${fmt(u.balance)} <span>${t("cur")}</span></h2>
   <div class="row3"><div class="glass" onclick="go('topup')">💳<br>${t("topup")}</div><div class="glass" onclick="alert(t('nopromo'))">🎟<br>${t("bonus")}</div><div class="glass" onclick="tg&&tg.openTelegramLink('https://t.me/'+S.cat.support)">💬<br>${t("support")}</div></div></div>
+  <div class="card" style="display:flex;align-items:center;gap:14px;padding:16px 18px" onclick="openReviews()"><div class="av" style="background:#3a3320;border-radius:14px;font-size:26px">⭐</div><div style="flex:1"><b style="font-size:24px">${(u.rating&&u.rating.count)?u.rating.avg.toFixed(1):"—"}</b> <span style="color:#facc15">★★★★★</span> <small style="color:var(--mut)">· ${(u.rating&&u.rating.count)||0} ${t("ratings_n")}</small></div><span style="color:var(--mut)">›</span></div>
   <div class="seg"><a class="${S.tab=="games"?"on":""}" onclick="S.tab='games';render()">${t("games")}</a><a class="${S.tab=="gift"?"on":""}" onclick="S.tab='gift';render()">Gift Code</a><a class="${S.tab=="ai"?"on":""}" onclick="S.tab='ai';render()">🤖 AI</a></div>${body}`}
 function openGame(id){S.game=S.cat.games.find(g=>g.id==id);S.sel=null;S.pid="";S.checked=false;S.ptab=Object.keys(S.game.tabs)[0];go("game")}
 function game(){const g=S.game;if(!g)return"";
@@ -78,6 +79,23 @@ function toJpeg(f){return new Promise((ok,no)=>{const im=new Image();im.onload=(
 async function sendRc(){const b=document.querySelector(".btn");b.disabled=true;
   try{const img=await toJpeg(S.file);const r=await api("/api/receipt",{id:S.pay.id,method:S.pay.method,image:img});
     if(r?.ok){modal(t("rcpt_title"),t("rcpt_body"),t("gotit"),()=>{S.file=null;S.amt=0;go("menu")})}else{alert(t("err"));b.disabled=false}}catch(e){alert(t("err"));b.disabled=false}}
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+async function openReviews(){const r=await api("/api/reviews");if(r&&r.items)S.rv=r;S.rf={s:0,g:"",o:"new"};go("rev")}
+function setRf(k,v){S.rf[k]=v;render()}
+function rev(){const R=S.rv||{items:[],dist:{},count:0,avg:0},f=S.rf||{s:0,g:"",o:"new"},d=R.dist||{};
+  const bars=[5,4,3,2,1].map(n=>{const p=R.count?Math.round((d[n]||0)*100/R.count):0;return `<div class="flex" style="align-items:center;gap:8px;margin:5px 0;font-size:13px;color:var(--mut)"><span style="width:10px">${n}</span><span style="color:#facc15">★</span><div style="flex:1;height:8px;border-radius:8px;background:var(--card2)"><div style="width:${p}%;height:100%;border-radius:8px;background:#facc15"></div></div><span style="width:36px;text-align:right">${p}%</span></div>`}).join("");
+  let it=R.items.filter(x=>(!f.s||x.stars==f.s)&&(!f.g||x.game==f.g));
+  if(f.o=="best")it=[...it].sort((a,b)=>b.stars-a.stars);if(f.o=="worst")it=[...it].sort((a,b)=>a.stars-b.stars);
+  const games=[...new Set(R.items.map(x=>x.game).filter(Boolean))];
+  const chip=(on,fn,txt)=>`<a class="${on?"on":""}" style="white-space:nowrap" onclick="${fn}">${txt}</a>`;
+  const c1=[chip(!f.s,"setRf('s',0)",t("all")),...[5,4,3,2,1].map(n=>chip(f.s==n,`setRf('s',${n})`,`${n} ★ ${d[n]||0}`))].join("");
+  const c2=games.map(g=>chip(f.g==g,`setRf('g','${f.g==g?"":g}')`,`🎮 ${esc(g.replace(/\s/g,""))} ${R.items.filter(x=>x.game==g).length}`)).join("");
+  const cards=it.map(x=>`<div class="card"><div class="flex" style="align-items:center"><div class="av" style="background:hsl(${x.id*47%360} 55% 42%)">${esc((x.name||"?")[0].toUpperCase())}</div><div style="flex:1"><b>${esc(x.name)}</b><br><span style="color:#facc15;font-size:15px">${"★".repeat(x.stars)}<span style="color:var(--line)">${"★".repeat(5-x.stars)}</span></span> <small style="background:var(--card2);color:var(--mut);padding:2px 8px;border-radius:8px;font-weight:700">${esc(x.game.replace(/\s/g,""))}</small></div><small style="color:var(--mut)">${x.date}</small></div><div style="color:var(--mut);margin-top:10px">🛒 ${esc(x.item)}</div>${x.text?`<p style="margin-top:8px;line-height:1.4">${esc(x.text)}</p>`:""}${x.reply?`<div style="margin-top:10px;border-left:3px solid var(--pr);background:var(--bg);border-radius:10px;padding:10px 12px"><small style="color:#8b7bff;font-weight:700">🛡 Diavex Shop</small><br>${esc(x.reply)}</div>`:""}</div>`).join("");
+  return `<h1 style="margin:10px 0 16px">${t("reviews")} <small style="color:var(--mut);font-size:16px">${R.count}</small></h1>
+  <div class="card flex" style="align-items:center"><div style="text-align:center;padding:0 12px"><div style="font-size:52px;font-weight:800">${R.count?R.avg.toFixed(1):"—"}</div><div style="color:#facc15">★★★★★</div><small style="color:var(--mut)">${R.count} ${t("ratings_n")}</small></div><div style="flex:1">${bars}</div></div>
+  <div class="reg" style="margin-bottom:10px">${c1}</div>${c2?`<div class="reg" style="margin-bottom:10px">${c2}</div>`:""}
+  <div class="seg" style="margin-top:6px">${[["new","newest"],["best","best"],["worst","worst"]].map(([k,n])=>`<a class="${f.o==k?"on":""}" onclick="setRf('o','${k}')">${t(n)}</a>`).join("")}</div>
+  ${cards||`<p style="color:var(--mut);text-align:center;margin-top:40px">${t("noreviews")}</p>`}`}
 function hist(){const H=S.hist;
   const o=S.htab=="orders"?H.orders.map(x=>`<div class="card li"><div><b>${x.title}</b><br><small style="color:var(--mut)">#${x.id} · ${x.date}</small></div><div style="text-align:right"><b>${x.price} ${t("cur")}</b><br><small class="ok">${x.status}</small></div></div>`).join(""):H.fin.map(x=>`<div class="card li"><div><b>${x.title}</b><br><small style="color:var(--mut)">${x.date}</small></div><b class="${x.amount>0?"ok":"bad"}">${x.amount>0?"+":""}${x.amount} ${t("cur")}</b></div>`).join("");
   return `<h1 style="margin:10px 0">${t("history")}</h1><div class="seg"><a class="${S.htab=="orders"?"on":""}" onclick="S.htab='orders';render()">${t("orders")}</a><a class="${S.htab=="fin"?"on":""}" onclick="S.htab='fin';render()">${t("finance")}</a></div>${o||`<p style="color:var(--mut);text-align:center;margin-top:40px">—</p>`}`}

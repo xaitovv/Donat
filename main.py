@@ -110,6 +110,22 @@ T = {
   done="🎉 <b>Your order is complete!</b>\n" + LINE + "\n🎮 Game: <b>{game}</b>\n📦 Product: <b>{item}</b>\n🆔 Player ID: {pid}{nick}\n💰 Paid: <b>{price} {cur}</b>\n🏷 Order: <b>#{oid}</b>\n" + LINE + "\n\nThank you for your purchase! 🙏\n\n⭐ <b>Rate our service:</b>",
   nick="\n🎭 Nickname: <b>{v}</b>", thx="Thanks for rating! {s}"),
 }
+_T2 = {
+ "tg": dict(wr="💬 Шарҳ навиштан", ask="💬 <b>Шарҳи худро нависед:</b>\n\nФикри худро дар бораи хизматрасонӣ нависед ва фиристед.\n\nБекор кардан: /cancel", got="✅ <b>Ташаккур барои шарҳатон!</b>\n\nФикри шумо барои мо хеле муҳим аст. 🙏", rep="💬 <b>Ба шарҳи шумо ҷавоб доданд</b>\n«{q}»\n\n🛡 <b>Diavex Shop:</b> {a}", canc="Бекор карда шуд."),
+ "ru": dict(wr="💬 Написать отзыв", ask="💬 <b>Напишите отзыв:</b>\n\nНапишите ваше мнение о нашем сервисе и отправьте.\n\nОтмена: /cancel", got="✅ <b>Спасибо за отзыв!</b>\n\nВаше мнение очень важно для нас. 🙏", rep="💬 <b>На ваш отзыв ответили</b>\n«{q}»\n\n🛡 <b>Diavex Shop:</b> {a}", canc="Отменено."),
+ "uz": dict(wr="💬 Sharh yozish", ask="💬 <b>Sharhingizni yozing:</b>\n\nXizmatimiz haqida fikringizni yozib yuboring.\n\nBekor qilish: /cancel", got="✅ <b>Sharhingiz uchun rahmat!</b>\n\nSizning fikringiz biz uchun juda muhim. 🙏", rep="💬 <b>Sharhingizga javob berishdi</b>\n«{q}»\n\n🛡 <b>Diavex Shop:</b> {a}", canc="Bekor qilindi."),
+ "en": dict(wr="💬 Write a review", ask="💬 <b>Write your review:</b>\n\nTell us what you think about our service and send it.\n\nCancel: /cancel", got="✅ <b>Thank you for your review!</b>\n\nYour opinion is very important to us. 🙏", rep="💬 <b>Your review received a reply</b>\n«{q}»\n\n🛡 <b>Diavex Shop:</b> {a}", canc="Cancelled."),
+}
+for _l, _d in _T2.items(): T[_l].update(_d)
+PEND = {}
+def shop_kb(l):
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=W[l]["shop"], web_app=WebAppInfo(url=C.MINIAPP_URL))]])
+def rstats():
+    d = {i: 0 for i in range(1, 6)}
+    for x in D.q("SELECT stars, COUNT(*) c FROM ratings GROUP BY stars"): d[x["stars"]] = x["c"]
+    n = sum(d.values())
+    return {"avg": round(sum(k * v for k, v in d.items()) / n, 1) if n else 0, "count": n, "dist": d}
+
 def lang_of(uid):
     u = D.q("SELECT lang FROM users WHERE id=?", (uid,)).fetchone()
     return u["lang"] if u and u["lang"] in T else "ru"
@@ -119,7 +135,7 @@ async def notify(uid, kind, o, nick=""):
     text = t[kind].format(item=e(o["item"] or o["title"]), game=e(o["game"] or ""), pid=e(str(o["pid"])), oid=o["id"], price=f"{o['price']:.2f}", cur=CUR[l], nick=nk)
     kb = None
     if kind == "done":
-        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=f"{n}⭐", callback_data=f"rt{o['id']}_{n}") for n in range(1, 6)]])
+        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⭐" * n, callback_data=f"rt{o['id']}_{n}")] for n in range(5, 0, -1)])
     try: await bot.send_message(uid, text, parse_mode="HTML", reply_markup=kb)
     except Exception: pass
 
@@ -136,11 +152,53 @@ async def done(c: CallbackQuery):
 async def rate(c: CallbackQuery):
     oid, n = map(int, c.data[2:].split("_"))
     o = D.q("SELECT * FROM orders WHERE id=? AND uid=? AND status='done'", (oid, c.from_user.id)).fetchone()
-    if o and D.q("INSERT OR IGNORE INTO ratings(oid,uid,stars) VALUES(?,?,?)", (oid, c.from_user.id, n)).rowcount:
+    if o and D.q("INSERT OR IGNORE INTO ratings(oid,uid,stars,ts) VALUES(?,?,?,datetime('now'))", (oid, c.from_user.id, n)).rowcount:
+        t = T[lang_of(c.from_user.id)]
         await c.message.edit_reply_markup()
-        await c.message.answer(T[lang_of(c.from_user.id)]["thx"].format(s="⭐" * n))
+        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=t["wr"], callback_data=f"rv{oid}")]])
+        await c.message.answer(t["thx"].format(s="⭐" * n), reply_markup=kb)
         await bot.send_message(C.ADMIN_ID, f"⭐ {n}/5 — #{oid}")
     await c.answer()
+
+@dp.callback_query(F.data.regexp(r"^rv\d+$"))
+async def rv(c: CallbackQuery):
+    oid = int(c.data[2:])
+    if D.q("SELECT 1 FROM ratings WHERE oid=? AND uid=? AND text=''", (oid, c.from_user.id)).fetchone():
+        PEND[c.from_user.id] = ("u", oid)
+        await c.message.edit_reply_markup()
+        await c.message.answer(T[lang_of(c.from_user.id)]["ask"], parse_mode="HTML")
+    await c.answer()
+
+@dp.callback_query(F.data.regexp(r"^rp\d+$"))
+async def rp(c: CallbackQuery):
+    if c.from_user.id != C.ADMIN_ID: return await c.answer()
+    PEND[C.ADMIN_ID] = ("a", int(c.data[2:]))
+    await c.message.answer(f"↩ Reply to review #{c.data[2:]} — send text (or /cancel)")
+    await c.answer()
+
+@dp.message(Command("cancel"))
+async def cancel(m: Message):
+    PEND.pop(m.from_user.id, None)
+    await m.answer(T[lang_of(m.from_user.id)]["canc"])
+
+@dp.message(F.text & ~F.text.startswith("/"))
+async def text_in(m: Message):
+    p = PEND.pop(m.from_user.id, None)
+    if not p: return
+    kind, oid = p; uid = m.from_user.id; txt = m.text.strip()[:500]
+    if kind == "u":
+        if D.q("UPDATE ratings SET text=? WHERE oid=? AND uid=? AND text=''", (txt, oid, uid)).rowcount:
+            await m.answer(T[lang_of(uid)]["got"], parse_mode="HTML", reply_markup=shop_kb(lang_of(uid)))
+            kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="↩ Reply", callback_data=f"rp{oid}")]])
+            await bot.send_message(C.ADMIN_ID, f"💬 #{oid} — {H.escape(m.from_user.full_name)}:\n{H.escape(txt)}", parse_mode="HTML", reply_markup=kb)
+    elif uid == C.ADMIN_ID:
+        r = D.q("SELECT * FROM ratings WHERE oid=?", (oid,)).fetchone()
+        if r:
+            D.q("UPDATE ratings SET reply=? WHERE oid=?", (txt, oid))
+            l = lang_of(r["uid"])
+            try: await bot.send_message(r["uid"], T[l]["rep"].format(q=H.escape(r["text"] or ""), a=H.escape(txt)), parse_mode="HTML", reply_markup=shop_kb(l))
+            except Exception: pass
+            await m.answer("✅ Sent")
 
 # ---------- API ----------
 def check_init(raw: str):
@@ -174,7 +232,7 @@ async def catalog(r): return web.json_response({**C.CATALOG, "bot": (await bot.m
 async def me(r):
     u = r["u"]; n = D.q("SELECT COUNT(*) c FROM users WHERE invited_by=?", (u["id"],)).fetchone()["c"]
     b = D.q("SELECT COUNT(*) c FROM users WHERE invited_by=? AND paid=1", (u["id"],)).fetchone()["c"]
-    return web.json_response({"balance": round(u["balance"], 2), "spent": round(u["spent"], 2), "lang": u["lang"], "ref": u["ref"], "refs": n, "buyers": b, "bonus": round(u["bonus"], 2)})
+    return web.json_response({"balance": round(u["balance"], 2), "spent": round(u["spent"], 2), "lang": u["lang"], "ref": u["ref"], "refs": n, "buyers": b, "bonus": round(u["bonus"], 2), "rating": rstats()})
 async def lang(r):
     l = (await r.json()).get("lang")
     if l in ("ru", "uz", "tg", "en"): D.q("UPDATE users SET lang=?, lang_set=1 WHERE id=?", (l, r["u"]["id"]))
@@ -209,6 +267,11 @@ async def receipt_api(r):
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✅", callback_data=f"ok{t['id']}"), InlineKeyboardButton(text="❌", callback_data=f"no{t['id']}")]])
     await bot.send_photo(C.ADMIN_ID, BufferedInputFile(raw, "receipt.jpg"), caption=f"💳 Top up #{t['id']}\nUser: {uid}\n{t['amount']} TJS\nMethod: {str(d.get('method', ''))[:20]}", reply_markup=kb)
     return web.json_response({"ok": True})
+async def reviews(r):
+    rows = D.q("SELECT r.oid, r.stars, r.text, r.reply, r.ts, o.game, o.item, o.title, u.name FROM ratings r JOIN orders o ON o.id=r.oid JOIN users u ON u.id=r.uid ORDER BY r.oid DESC LIMIT 300").fetchall()
+    dt = lambda s: f"{s[8:10]}.{s[5:7]}.{s[:4]}" if s else ""
+    items = [{"id": x["oid"], "name": (x["name"] or "?")[:20], "stars": x["stars"], "game": x["game"] or "", "item": x["item"] or x["title"], "text": x["text"] or "", "reply": x["reply"] or "", "date": dt(x["ts"])} for x in rows]
+    return web.json_response({**rstats(), "items": items})
 async def history(r):
     uid = r["u"]["id"]; f = lambda x: str(x)[:16]
     o = [{"id": x["id"], "title": x["title"], "price": x["price"], "status": x["status"], "date": f(x["ts"])} for x in D.q("SELECT * FROM orders WHERE uid=? ORDER BY id DESC LIMIT 50", (uid,))]
@@ -222,7 +285,7 @@ def _img(path):
 async def main():
     app = web.Application(middlewares=[mw], client_max_size=8 * 1024 * 1024)
     app.add_routes([web.get("/api/catalog", catalog), web.get("/api/me", me), web.post("/api/lang", lang), web.post("/api/order", order),
-                    web.post("/api/topup", topup), web.post("/api/receipt", receipt_api), web.get("/api/history", history), web.route("OPTIONS", "/{p:.*}", lambda r: web.Response()),
+                    web.post("/api/topup", topup), web.post("/api/receipt", receipt_api), web.get("/api/history", history), web.get("/api/reviews", reviews), web.route("OPTIONS", "/{p:.*}", lambda r: web.Response()),
                     web.get("/", lambda r: web.FileResponse(os.path.join(HERE, "index.html")))])
     for f in ("style.css", "app.js", "i18n.js", "ru.json", "uz.json", "tg.json", "en.json", "logo.png", "splash.jpg"):
         app.router.add_get("/" + f, lambda r, f=f: web.FileResponse(os.path.join(HERE, f)))
