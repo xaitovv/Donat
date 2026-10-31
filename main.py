@@ -8,6 +8,18 @@ from aiogram.types import (Message, CallbackQuery, InlineKeyboardMarkup,
                            InlineKeyboardButton, WebAppInfo, BufferedInputFile, FSInputFile)
 import config as C, database as D
 
+# Baza tuzilmasini o'zi tekshiradi (database.py eski bo'lsa ham ishlayveradi)
+for _s in ("CREATE TABLE IF NOT EXISTS ratings(oid INTEGER PRIMARY KEY,uid INTEGER,stars INTEGER)",
+           "ALTER TABLE users ADD COLUMN lang_set INTEGER DEFAULT 0",
+           "ALTER TABLE orders ADD COLUMN game TEXT DEFAULT ''",
+           "ALTER TABLE orders ADD COLUMN item TEXT DEFAULT ''",
+           "ALTER TABLE ratings ADD COLUMN text TEXT DEFAULT ''",
+           "ALTER TABLE ratings ADD COLUMN reply TEXT DEFAULT ''",
+           "ALTER TABLE ratings ADD COLUMN ts TEXT"):
+    try: D.q(_s)
+    except Exception: pass
+
+
 import os
 HERE = os.path.dirname(os.path.abspath(__file__))
 bot = Bot(C.BOT_TOKEN); dp = Dispatcher()
