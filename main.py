@@ -3,9 +3,9 @@ import asyncio, base64, hmac, hashlib, json, time
 from urllib.parse import parse_qsl
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F
-from aiogram.filters import CommandStart, CommandObject
+from aiogram.filters import Command, CommandStart, CommandObject
 from aiogram.types import (Message, CallbackQuery, InlineKeyboardMarkup,
-                           InlineKeyboardButton, WebAppInfo, BufferedInputFile)
+                           InlineKeyboardButton, WebAppInfo, BufferedInputFile, FSInputFile)
 import config as C, database as D
 
 import os
@@ -13,11 +13,60 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 bot = Bot(C.BOT_TOKEN); dp = Dispatcher()
 
 # ---------- BOT ----------
+PICK = "🌐 Tilni tanlang · Выберите язык · Забонро интихоб кунед · Choose language"
+W = {
+ "tg": dict(text="👋 <b>Хуш омадед ба Diavex Shop!</b>\n\n🎮 Донат барои бозиҳои дӯстдоштаатон: зуд, арзон ва бехатар.\n\n✨ Бо мо хеле қулай аст!\n\n🙏 Ташаккур, ки моро интихоб кардед!", shop="🛍 Оғози харид", les="🎬 Дарсҳо", ord="📝 Фармоишҳо", chan="📢 Канали хабарҳо", lang="🌐 Забон", sup="💬 Дастгирӣ"),
+ "ru": dict(text="👋 <b>Добро пожаловать в Diavex Shop!</b>\n\n🎮 Донат для ваших любимых игр: быстро, выгодно и безопасно.\n\n✨ С нами удобно!\n\n🙏 Спасибо, что выбрали нас!", shop="🛍 Начать покупки", les="🎬 Уроки", ord="📝 Заказы", chan="📢 Канал новостей", lang="🌐 Язык", sup="💬 Поддержка"),
+ "uz": dict(text="👋 <b>Diavex Shop'ga xush kelibsiz!</b>\n\n🎮 Sevimli o'yinlaringiz uchun donat: tez, arzon va xavfsiz.\n\n✨ Biz bilan juda qulay!\n\n🙏 Bizni tanlaganingiz uchun rahmat!", shop="🛍 Xaridni boshlash", les="🎬 Darslar", ord="📝 Buyurtmalar", chan="📢 Yangiliklar kanali", lang="🌐 Til", sup="💬 Yordam"),
+ "en": dict(text="👋 <b>Welcome to Diavex Shop!</b>\n\n🎮 Top-ups for your favorite games: fast, affordable and safe.\n\n✨ It's easy with us!\n\n🙏 Thank you for choosing us!", shop="🛍 Start shopping", les="🎬 Tutorials", ord="📝 Orders", chan="📢 News channel", lang="🌐 Language", sup="💬 Support"),
+}
+FID = {}
+def picker():
+    b = lambda t, l: InlineKeyboardButton(text=t, callback_data="lg_" + l)
+    return InlineKeyboardMarkup(inline_keyboard=[[b("🇺🇿 O'zbekcha", "uz"), b("🇹🇯 Тоҷикӣ", "tg")], [b("🇷🇺 Русский", "ru"), b("🇬🇧 English", "en")]])
+
+async def welcome(chat_id, l):
+    l = l if l in W else "ru"; w = W[l]
+    rows = [[InlineKeyboardButton(text=w["shop"], web_app=WebAppInfo(url=C.MINIAPP_URL))]]
+    r = []
+    if C.LESSONS_URL: r.append(InlineKeyboardButton(text=w["les"], url=C.LESSONS_URL))
+    r.append(InlineKeyboardButton(text=w["ord"], web_app=WebAppInfo(url=C.MINIAPP_URL.rstrip("/") + "/?go=hist")))
+    rows.append(r)
+    if C.CHANNEL_URL: rows.append([InlineKeyboardButton(text=w["chan"], url=C.CHANNEL_URL)])
+    r = [InlineKeyboardButton(text=w["lang"], callback_data="chlang")]
+    if C.SUPPORT: r.append(InlineKeyboardButton(text=w["sup"], url=f"https://t.me/{C.SUPPORT}"))
+    rows.append(r)
+    kb = InlineKeyboardMarkup(inline_keyboard=rows)
+    try:
+        msg = await bot.send_photo(chat_id, FID.get(l) or FSInputFile(os.path.join(HERE, f"welcome_{l}.jpg")), caption=w["text"], parse_mode="HTML", reply_markup=kb)
+        FID[l] = msg.photo[-1].file_id
+    except Exception:
+        await bot.send_message(chat_id, w["text"], parse_mode="HTML", reply_markup=kb)
+
 @dp.message(CommandStart())
 async def start(m: Message, command: CommandObject):
-    D.user(m.from_user.id, m.from_user.full_name, command.args)
-    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🎮 Open", web_app=WebAppInfo(url=C.MINIAPP_URL))]])
-    await m.answer("Donat 🎮", reply_markup=kb)
+    u = D.user(m.from_user.id, m.from_user.full_name, command.args)
+    if u["lang_set"]: await welcome(m.chat.id, u["lang"])
+    else: await m.answer(PICK, reply_markup=picker())
+
+@dp.message(Command("lang"))
+async def lang_cmd(m: Message):
+    D.user(m.from_user.id, m.from_user.full_name)
+    await m.answer(PICK, reply_markup=picker())
+
+@dp.callback_query(F.data == "chlang")
+async def chlang(c: CallbackQuery):
+    await c.message.answer(PICK, reply_markup=picker()); await c.answer()
+
+@dp.callback_query(F.data.regexp(r"^lg_(uz|tg|ru|en)$"))
+async def pick_lang(c: CallbackQuery):
+    l = c.data[3:]
+    D.user(c.from_user.id, c.from_user.full_name)
+    D.q("UPDATE users SET lang=?, lang_set=1 WHERE id=?", (l, c.from_user.id))
+    await c.answer()
+    try: await c.message.delete()
+    except Exception: pass
+    await welcome(c.from_user.id, l)
 
 @dp.message(F.photo)  # mijoz chek yuboradi -> adminga
 async def receipt(m: Message):
@@ -128,7 +177,7 @@ async def me(r):
     return web.json_response({"balance": round(u["balance"], 2), "spent": round(u["spent"], 2), "lang": u["lang"], "ref": u["ref"], "refs": n, "buyers": b, "bonus": round(u["bonus"], 2)})
 async def lang(r):
     l = (await r.json()).get("lang")
-    if l in ("ru", "uz", "tg", "en"): D.q("UPDATE users SET lang=? WHERE id=?", (l, r["u"]["id"]))
+    if l in ("ru", "uz", "tg", "en"): D.q("UPDATE users SET lang=?, lang_set=1 WHERE id=?", (l, r["u"]["id"]))
     return web.json_response({"ok": True})
 async def order(r):
     d = await r.json(); g, i = C.find_item(d.get("game"), d.get("item"))

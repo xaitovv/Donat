@@ -29,3 +29,9 @@ if DC_PHONE:
     PAY.append({"id": "dc", "name": "DC Next", "type": "phone", "value": DC_PHONE, "holder": DC_HOLDER, "cur": "TJS", "color": "#e8590c", "icon": "DC"})
 elif CARD:
     PAY.append({"id": "dc", "name": "DC Next", "type": "card", "value": CARD, "holder": HOLDER, "cur": "TJS", "color": "#e8590c", "icon": "DC"})
+
+def _url(v):
+    v = v.strip()
+    return "https://t.me/" + v[1:] if v.startswith("@") else v
+CHANNEL_URL = _url(os.getenv("CHANNEL_URL", ""))   # yangiliklar kanali (https://t.me/... yoki @kanal)
+LESSONS_URL = _url(os.getenv("LESSONS_URL", ""))   # darslar havolasi
