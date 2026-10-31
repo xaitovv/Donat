@@ -12,6 +12,11 @@ CREATE TABLE IF NOT EXISTS fin(id INTEGER PRIMARY KEY AUTOINCREMENT,uid INTEGER,
 for _c in ("game", "item"):
     try: db.execute(f"ALTER TABLE orders ADD COLUMN {_c} TEXT DEFAULT ''")
     except sqlite3.OperationalError: pass
+try: db.execute("ALTER TABLE users ADD COLUMN lang_set INTEGER DEFAULT 0")
+except sqlite3.OperationalError: pass
+for _c, _t in (("text", "TEXT DEFAULT ''"), ("reply", "TEXT DEFAULT ''"), ("ts", "TEXT")):
+    try: db.execute(f"ALTER TABLE ratings ADD COLUMN {_c} {_t}")
+    except sqlite3.OperationalError: pass
 def q(sql, a=()):
     with _l: return db.execute(sql, a)
 def user(uid, name="", inviter=None):
