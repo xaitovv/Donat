@@ -13,7 +13,7 @@ async function init(){
   if(me&&!me.error){S.u=me;if(me.lang&&me.lang!==LANG)await setLang(me.lang)}
   if(cat)S.cat=cat;
   if(localStorage.getItem("light"))document.body.classList.add("light");
-  render();setTimeout(()=>$("#splash").classList.add("hide"),Math.max(0,5000-(Date.now()-T0)))}
+  render();setTimeout(()=>$("#splash").classList.add("hide"),Math.max(0,3000-(Date.now()-T0)))}
 function render(){
   const v=S.view,m={menu,game,topup,meth,hist,friends,set,pay:payv},sub=["game","topup","meth","pay"].includes(v);
   $("#app").innerHTML=m[v]();
