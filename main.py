@@ -1,4 +1,6 @@
 import html as H
+import logging
+logging.basicConfig(level=logging.INFO)
 import asyncio, base64, hmac, hashlib, json, time
 from urllib.parse import parse_qsl
 from aiohttp import web
@@ -37,23 +39,33 @@ def picker():
     b = lambda t, l: InlineKeyboardButton(text=t, callback_data="lg_" + l)
     return InlineKeyboardMarkup(inline_keyboard=[[b("🇺🇿 O'zbekcha", "uz"), b("🇹🇯 Тоҷикӣ", "tg")], [b("🇷🇺 Русский", "ru"), b("🇬🇧 English", "en")]])
 
-async def welcome(chat_id, l):
-    l = l if l in W else "ru"; w = W[l]
-    rows = [[InlineKeyboardButton(text=w["shop"], web_app=WebAppInfo(url=C.MINIAPP_URL))]]
+def _kb(w):
+    url = (C.MINIAPP_URL or "").strip(); ok = url.startswith("https://")
+    rows = []
+    if ok: rows.append([InlineKeyboardButton(text=w["shop"], web_app=WebAppInfo(url=url))])
     r = []
-    if C.LESSONS_URL: r.append(InlineKeyboardButton(text=w["les"], url=C.LESSONS_URL))
-    r.append(InlineKeyboardButton(text=w["ord"], web_app=WebAppInfo(url=C.MINIAPP_URL.rstrip("/") + "/?go=hist")))
-    rows.append(r)
-    if C.CHANNEL_URL: rows.append([InlineKeyboardButton(text=w["chan"], url=C.CHANNEL_URL)])
+    if C.LESSONS_URL.startswith("http"): r.append(InlineKeyboardButton(text=w["les"], url=C.LESSONS_URL))
+    if ok: r.append(InlineKeyboardButton(text=w["ord"], web_app=WebAppInfo(url=url.rstrip("/") + "/?go=hist")))
+    if r: rows.append(r)
+    if C.CHANNEL_URL.startswith("http"): rows.append([InlineKeyboardButton(text=w["chan"], url=C.CHANNEL_URL)])
     r = [InlineKeyboardButton(text=w["lang"], callback_data="chlang")]
-    if C.SUPPORT: r.append(InlineKeyboardButton(text=w["sup"], url=f"https://t.me/{C.SUPPORT}"))
+    sup = (C.SUPPORT or "").strip().lstrip("@")
+    if sup: r.append(InlineKeyboardButton(text=w["sup"], url=f"https://t.me/{sup}"))
     rows.append(r)
-    kb = InlineKeyboardMarkup(inline_keyboard=rows)
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+async def welcome(chat_id, l):
+    l = l if l in W else "ru"; w = W[l]; kb = _kb(w)
     try:
         msg = await bot.send_photo(chat_id, FID.get(l) or FSInputFile(os.path.join(HERE, f"welcome_{l}.jpg")), caption=w["text"], parse_mode="HTML", reply_markup=kb)
         FID[l] = msg.photo[-1].file_id
     except Exception:
-        await bot.send_message(chat_id, w["text"], parse_mode="HTML", reply_markup=kb)
+        logging.exception("welcome: photo failed")
+        try:
+            await bot.send_message(chat_id, w["text"], parse_mode="HTML", reply_markup=kb)
+        except Exception:
+            logging.exception("welcome: keyboard failed")
+            await bot.send_message(chat_id, w["text"], parse_mode="HTML")
 
 @dp.message(CommandStart())
 async def start(m: Message, command: CommandObject):
@@ -284,9 +296,19 @@ async def reviews(r):
     dt = lambda s: f"{s[8:10]}.{s[5:7]}.{s[:4]}" if s else ""
     items = [{"id": x["oid"], "name": (x["name"] or "?")[:20], "stars": x["stars"], "game": x["game"] or "", "item": x["item"] or x["title"], "text": x["text"] or "", "reply": x["reply"] or "", "date": dt(x["ts"])} for x in rows]
     return web.json_response({**rstats(), "items": items})
+async def top_api(r):
+    kind = r.query.get("kind", "donors"); cut = {"week": "-7 days", "month": "-30 days"}.get(r.query.get("period", "week"))
+    a = (cut,) if cut else ()
+    if kind == "topups":
+        w = "AND f.ts >= datetime('now', ?)" if cut else ""
+        rows = D.q(f"SELECT u.name, SUM(f.amount) s FROM fin f JOIN users u ON u.id=f.uid WHERE f.title='Top up' {w} GROUP BY f.uid ORDER BY s DESC LIMIT 20", a)
+    else:
+        w = "AND o.ts >= datetime('now', ?)" if cut else ""
+        rows = D.q(f"SELECT u.name, SUM(o.price) s FROM orders o JOIN users u ON u.id=o.uid WHERE 1=1 {w} GROUP BY o.uid ORDER BY s DESC LIMIT 20", a)
+    return web.json_response({"items": [{"name": (x["name"] or "?")[:20], "total": round(x["s"] or 0, 2)} for x in rows]})
 async def history(r):
-    uid = r["u"]["id"]; f = lambda x: str(x)[:16]
-    o = [{"id": x["id"], "title": x["title"], "price": x["price"], "status": x["status"], "date": f(x["ts"])} for x in D.q("SELECT * FROM orders WHERE uid=? ORDER BY id DESC LIMIT 50", (uid,))]
+    uid = r["u"]["id"]; f = lambda x: (lambda s: f"{s[8:10]}.{s[5:7]}.{s[:4]} {s[11:16]}" if len(s) >= 16 else s)(str(x or ""))
+    o = [{"id": x["id"], "title": x["title"], "price": x["price"], "status": x["status"], "date": f(x["ts"]), "game": x["game"] or "", "item": x["item"] or ""} for x in D.q("SELECT * FROM orders WHERE uid=? ORDER BY id DESC LIMIT 50", (uid,))]
     n = [{"title": x["title"], "amount": x["amount"], "date": f(x["ts"])} for x in D.q("SELECT * FROM fin WHERE uid=? ORDER BY id DESC LIMIT 50", (uid,))]
     return web.json_response({"orders": o, "fin": n})
 
@@ -297,7 +319,7 @@ def _img(path):
 async def main():
     app = web.Application(middlewares=[mw], client_max_size=8 * 1024 * 1024)
     app.add_routes([web.get("/api/catalog", catalog), web.get("/api/me", me), web.post("/api/lang", lang), web.post("/api/order", order),
-                    web.post("/api/topup", topup), web.post("/api/receipt", receipt_api), web.get("/api/history", history), web.get("/api/reviews", reviews), web.route("OPTIONS", "/{p:.*}", lambda r: web.Response()),
+                    web.post("/api/topup", topup), web.post("/api/receipt", receipt_api), web.get("/api/history", history), web.get("/api/top", top_api), web.get("/api/reviews", reviews), web.route("OPTIONS", "/{p:.*}", lambda r: web.Response()),
                     web.get("/", lambda r: web.FileResponse(os.path.join(HERE, "index.html")))])
     for f in ("style.css", "app.js", "i18n.js", "ru.json", "uz.json", "tg.json", "en.json", "logo.png", "splash.jpg"):
         app.router.add_get("/" + f, lambda r, f=f: web.FileResponse(os.path.join(HERE, f)))

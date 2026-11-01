@@ -53,3 +53,21 @@ input{width:100%;background:var(--bg);border:1px solid var(--line);border-radius
 .dots i{width:10px;height:10px;border-radius:50%;background:#e5e7eb;opacity:.25;animation:dt 1.2s infinite}
 .dots i:nth-child(2){animation-delay:.2s}.dots i:nth-child(3){animation-delay:.4s}
 @keyframes dt{0%,100%{opacity:.25;transform:scale(.8)}30%{opacity:1;transform:scale(1.25);box-shadow:0 0 12px #fff}}
+#nav a{display:flex;flex-direction:column;align-items:center;gap:3px;padding:9px 0 8px}
+#nav a svg{width:24px;height:24px}
+.oc{display:flex;align-items:center;gap:14px;background:var(--card);border:1px solid var(--line);border-left:4px solid var(--pr);border-radius:20px;padding:14px 16px;margin-bottom:12px}
+.oi{width:58px;height:58px;border-radius:16px;background:#0b0b14;position:relative;overflow:hidden;display:grid;place-items:center;flex:none;font-weight:800;font-size:22px}
+.tr{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sm{color:var(--mut);font-size:13px;margin-top:3px}.sm2{color:#5a5a78;font-size:12px;margin-top:2px}
+.bd{display:inline-block;margin-top:10px;padding:5px 10px;border-radius:8px;font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase}
+.bd.done{background:#0f3d33;color:#22c993;border:1px solid #165c4a}.bd.pending{background:#3d3313;color:#facc15;border:1px solid #5c4a16}.bd.cancelled{background:#3d1414;color:#ff6b6b;border:1px solid #5c1c1c}
+.reg.chips a{min-width:0;padding:10px 18px;border-radius:22px;white-space:nowrap;font-weight:700;font-size:14px;color:var(--mut)}
+.reg.chips a.on{background:linear-gradient(135deg,#6d5bff,#8b5cf6);color:#fff;border-color:transparent}
+.ti{width:46px;height:46px;border-radius:14px;display:grid;place-items:center;flex:none}
+.mr{display:flex;align-items:center;gap:14px;padding:16px 18px;border-bottom:1px solid var(--line)}.mr:last-child{border:0}.mr b{flex:1}.chv{color:var(--mut)}
+.ring{width:88px;height:88px;border-radius:50%;padding:3px;background:linear-gradient(135deg,#8b5cf6,#ec4899);flex:none}
+.ring>div{width:100%;height:100%;border-radius:50%;background:#1b1d33;overflow:hidden;display:grid;place-items:center;font-size:32px;font-weight:800;color:#fff}
+.ring img{width:100%;height:100%}
+.chip{display:inline-flex;align-items:center;gap:6px;margin-top:8px;background:#ffffff12;border:1px solid #ffffff1a;border-radius:12px;padding:5px 10px;font-size:13px;color:var(--mut)}
+.rk{display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--line);border-radius:20px;padding:12px 16px;margin-bottom:10px}
+.rk.gold{box-shadow:0 6px 24px #f59e0b26;border-color:#3a2f12}
