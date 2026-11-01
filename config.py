@@ -35,3 +35,5 @@ def _url(v):
     return "https://t.me/" + v[1:] if v.startswith("@") else v
 CHANNEL_URL = _url(os.getenv("CHANNEL_URL", ""))   # yangiliklar kanali (https://t.me/... yoki @kanal)
 LESSONS_URL = _url(os.getenv("LESSONS_URL", ""))   # darslar havolasi
+
+TZ_HOURS = float(os.getenv("TZ_HOURS", "5"))  # admin xabarlaridagi vaqt (UTC+5)

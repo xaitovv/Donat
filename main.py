@@ -1,4 +1,5 @@
 import html as H
+from datetime import datetime, timezone, timedelta
 import logging
 logging.basicConfig(level=logging.INFO)
 import asyncio, base64, hmac, hashlib, json, time
@@ -17,7 +18,8 @@ for _s in ("CREATE TABLE IF NOT EXISTS ratings(oid INTEGER PRIMARY KEY,uid INTEG
            "ALTER TABLE orders ADD COLUMN item TEXT DEFAULT ''",
            "ALTER TABLE ratings ADD COLUMN text TEXT DEFAULT ''",
            "ALTER TABLE ratings ADD COLUMN reply TEXT DEFAULT ''",
-           "ALTER TABLE ratings ADD COLUMN ts TEXT"):
+           "ALTER TABLE ratings ADD COLUMN ts TEXT",
+           "ALTER TABLE topups ADD COLUMN method TEXT DEFAULT ''"):
     try: D.q(_s)
     except Exception: pass
 
@@ -105,13 +107,19 @@ async def receipt(m: Message):
 @dp.callback_query(F.data.regexp(r"^(ok|no)\d+$"))
 async def decide(c: CallbackQuery):
     if c.from_user.id != C.ADMIN_ID: return await c.answer()
-    tid = int(c.data[2:])
-    if c.data.startswith("ok"):
+    tid = int(c.data[2:]); okay = c.data.startswith("ok"); done = False
+    if okay:
         t = D.approve_topup(tid, C.REF_PERCENT)
-        if t: await bot.send_message(t["uid"], f"✅ +{t['amount']}")
+        if t: done = True; await tell(t["uid"], "okd", amt=f"{t['amount']:.2f}", no=tid)
     else:
-        D.q("UPDATE topups SET status='rejected' WHERE id=? AND status='pending'", (tid,))
-    await c.message.edit_reply_markup(); await c.answer("OK")
+        t = D.q("SELECT * FROM topups WHERE id=? AND status='pending'", (tid,)).fetchone()
+        if t and D.q("UPDATE topups SET status='rejected' WHERE id=? AND status='pending'", (tid,)).rowcount:
+            done = True; await tell(t["uid"], "rej", no=tid)
+    try:
+        if done: await c.message.edit_caption(caption=(c.message.html_text or "") + ("\n\n✅ <b>Tasdiqlandi</b>" if okay else "\n\n❌ <b>Rad etildi</b>"), parse_mode="HTML")
+        else: await c.message.edit_reply_markup()
+    except Exception: pass
+    await c.answer("OK" if done else "—")
 
 import html as H
 CUR = {"ru": "сомони", "uz": "somoni", "tg": "сомонӣ", "en": "TJS"}
@@ -141,6 +149,24 @@ _T2 = {
  "en": dict(wr="💬 Write a review", ask="💬 <b>Write your review:</b>\n\nTell us what you think about our service and send it.\n\nCancel: /cancel", got="✅ <b>Thank you for your review!</b>\n\nYour opinion is very important to us. 🙏", rep="💬 <b>Your review received a reply</b>\n«{q}»\n\n🛡 <b>Diavex Shop:</b> {a}", canc="Cancelled."),
 }
 for _l, _d in _T2.items(): T[_l].update(_d)
+_T3 = {
+ "tg": dict(rcv="⏳ <b>Пардохти шумо қабул шуд!</b>\n\n💵 Маблағ: <b>{amt} сомонӣ</b>\n🏦 Усул: <b>{method}</b>\n🔢 Дархост #: {no}\n\nСистема тафтишотро анҷом медиҳад, маблағ ба зудӣ ба балансатон илова мешавад ✅",
+  okd="✅ <b>Пардохти шумо тасдиқ шуд!</b>\n\n💰 <b>+{amt} сомонӣ</b> ба балансатон илова шуд.\n🆔 Депозит: #{no}",
+  rej="❌ <b>Пардохти шумо рад карда шуд.</b>\n\n🔢 Дархост #: {no}\nАгар хато шуда бошад, ба дастгирӣ нависед.", kind_phone="Телефон", kind_card="Корт"),
+ "ru": dict(rcv="⏳ <b>Ваш платёж принят!</b>\n\n💵 Сумма: <b>{amt} сомони</b>\n🏦 Способ: <b>{method}</b>\n🔢 Заявка #: {no}\n\nСистема проверяет платёж, сумма скоро поступит на ваш баланс ✅",
+  okd="✅ <b>Ваш платёж подтверждён!</b>\n\n💰 <b>+{amt} сомони</b> зачислено на ваш баланс.\n🆔 Депозит: #{no}",
+  rej="❌ <b>Ваш платёж отклонён.</b>\n\n🔢 Заявка #: {no}\nЕсли это ошибка, напишите в поддержку.", kind_phone="Телефон", kind_card="Карта"),
+ "uz": dict(rcv="⏳ <b>To'lovingiz qabul qilindi!</b>\n\n💵 Summa: <b>{amt} somoni</b>\n🏦 Usul: <b>{method}</b>\n🔢 So'rov #: {no}\n\nTizim tekshiruvni amalga oshiradi, summa tez orada balansingizga qo'shiladi ✅",
+  okd="✅ <b>To'lovingiz tasdiqlandi!</b>\n\n💰 <b>+{amt} somoni</b> balansingizga qo'shildi.\n🆔 Depozit: #{no}",
+  rej="❌ <b>To'lovingiz rad etildi.</b>\n\n🔢 So'rov #: {no}\nXato bo'lgan bo'lsa, yordamga yozing.", kind_phone="Telefon", kind_card="Karta"),
+ "en": dict(rcv="⏳ <b>Your payment has been received!</b>\n\n💵 Amount: <b>{amt} TJS</b>\n🏦 Method: <b>{method}</b>\n🔢 Request #: {no}\n\nThe system is checking it, the amount will be added to your balance shortly ✅",
+  okd="✅ <b>Your payment is confirmed!</b>\n\n💰 <b>+{amt} TJS</b> has been added to your balance.\n🆔 Deposit: #{no}",
+  rej="❌ <b>Your payment was declined.</b>\n\n🔢 Request #: {no}\nIf this is a mistake, contact support.", kind_phone="Phone", kind_card="Card"),
+}
+for _l, _d in _T3.items(): T[_l].update(_d)
+async def tell(uid, key, **kw):
+    try: await bot.send_message(uid, T[lang_of(uid)][key].format(**kw), parse_mode="HTML")
+    except Exception: logging.exception("tell failed")
 PEND = {}
 def shop_kb(l):
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=W[l]["shop"], web_app=WebAppInfo(url=C.MINIAPP_URL))]])
@@ -244,7 +270,7 @@ async def mw(req, handler):
         if req.path.startswith("/api/") and req.path != "/api/catalog":
             u = check_init(req.headers.get("X-Init", ""))
             if not u: return web.json_response({"error": "auth"}, status=401, headers=cors())
-            req["u"] = D.user(u["id"], u.get("first_name", ""))
+            req["u"] = D.user(u["id"], u.get("first_name", "")); req["tg"] = u
             k = u["id"]; now = time.time()  # rate limit: 30 so'rov/daqiqa
             hits[k] = [x for x in hits.get(k, []) if now - x < 60] + [now]
             if len(hits[k]) > 30: return web.json_response({"error": "rate"}, status=429, headers=cors())
@@ -278,18 +304,32 @@ async def topup(r):
     except Exception: a = 0
     x = next((p for p in C.PAY if p["id"] == d.get("method")), None)
     if not x or not 10 <= a <= 5000: return web.json_response({"error": "bad"})
-    tid = D.q("INSERT INTO topups(uid,amount) VALUES(?,?)", (r["u"]["id"], a)).lastrowid
     pa = a if x["cur"] == "TJS" else round(a / C.RATE)
-    return web.json_response({"ok": True, "id": tid, "amount": a, "pay": pa, "cur": x["cur"], "type": x["type"], "value": x["value"], "holder": x["holder"], "name": x["name"], "icon": x["icon"], "color": x["color"], "method": x["id"]})
+    return web.json_response({"ok": True, "id": 0, "amount": a, "pay": pa, "cur": x["cur"], "type": x["type"], "value": x["value"], "holder": x["holder"], "name": x["name"], "icon": x["icon"], "color": x["color"], "method": x["id"]})
 async def receipt_api(r):
-    d = await r.json(); uid = r["u"]["id"]
-    t = D.q("SELECT * FROM topups WHERE id=? AND uid=? AND status='pending'", (d.get("id"), uid)).fetchone()
+    d = await r.json(); uid = r["u"]["id"]; tg = r["tg"]
+    try: a = float(d.get("amount", 0))
+    except Exception: a = 0
+    x = next((p for p in C.PAY if p["id"] == d.get("method")), None)
     try: raw = base64.b64decode(str(d.get("image", "")).split(",")[-1], validate=True)
     except Exception: raw = b""
-    if not t or not 1000 < len(raw) < 6_000_000 or not (raw[:3] == b"\xff\xd8\xff" or raw[:4] == b"\x89PNG"):
+    if not x or not 10 <= a <= 5000 or not 1000 < len(raw) < 6_000_000 or not (raw[:3] == b"\xff\xd8\xff" or raw[:4] == b"\x89PNG"):
         return web.json_response({"error": "bad"})
-    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✅", callback_data=f"ok{t['id']}"), InlineKeyboardButton(text="❌", callback_data=f"no{t['id']}")]])
-    await bot.send_photo(C.ADMIN_ID, BufferedInputFile(raw, "receipt.jpg"), caption=f"💳 Top up #{t['id']}\nUser: {uid}\n{t['amount']} TJS\nMethod: {str(d.get('method', ''))[:20]}", reply_markup=kb)
+    if D.q("SELECT COUNT(*) c FROM topups WHERE uid=? AND status='pending'", (uid,)).fetchone()["c"] >= 5:
+        return web.json_response({"error": "limit"})
+    tid = D.q("INSERT INTO topups(uid,amount,method) VALUES(?,?,?)", (uid, a, x["id"])).lastrowid
+    e = H.escape
+    when = datetime.now(timezone(timedelta(hours=C.TZ_HOURS))).strftime("%d.%m.%Y %H:%M")
+    full = f"{tg.get('first_name', '')} {tg.get('last_name', '')}".strip() or "—"
+    un = f"@{tg['username']}" if tg.get("username") else "—"
+    cap = (f"💳 <b>Balans to'ldirish #{tid}</b>\n🏦 Usul: <b>{e(x['name'].upper())}</b>\n💵 Mablag': <b>{a:g} somoni</b>\n"
+           f"🆔 Telegram ID: <code>{uid}</code>\n👤 Ism: {e(full)}\n🔗 Username: {e(un)}\n🕒 Vaqt: {when}")
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✅ Tasdiqlash", callback_data=f"ok{tid}"), InlineKeyboardButton(text="❌ Rad etish", callback_data=f"no{tid}")]])
+    try: await bot.send_photo(C.ADMIN_ID, BufferedInputFile(raw, "receipt.jpg"), caption=cap, parse_mode="HTML", reply_markup=kb)
+    except Exception:
+        logging.exception("receipt: admin send failed"); D.q("DELETE FROM topups WHERE id=?", (tid,))
+        return web.json_response({"error": "send"})
+    await tell(uid, "rcv", no=tid, amt=f"{a:g}", method=f"{x['name']} ({T[lang_of(uid)]['kind_' + x['type']]})")
     return web.json_response({"ok": True})
 async def reviews(r):
     rows = D.q("SELECT r.oid, r.stars, r.text, r.reply, r.ts, o.game, o.item, o.title, u.name FROM ratings r JOIN orders o ON o.id=r.oid JOIN users u ON u.id=r.uid ORDER BY r.oid DESC LIMIT 300").fetchall()

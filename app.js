@@ -46,8 +46,9 @@ async function buy(){const r=await api("/api/order",{game:S.game.id,item:S.sel,p
   if(r?.ok){S.u.balance=r.balance;alert(t("ordered"));go("hist")}else alert(t("err"))}
 const CPY='<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#8b7bff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-left:6px"><rect x="9" y="9" width="12" height="12" rx="2.5"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg>';
 const pi=id=>`<img class="gimg" src="/${id}.png?v=6" onerror="this.style.display='none'">`;
-function modal(title,body,btn,cb){const o=document.createElement("div");o.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:30;display:flex;align-items:center;justify-content:center;padding:24px";
- o.innerHTML=`<div style="background:var(--card);border:1px solid var(--line);border-radius:28px;padding:30px 24px 24px;width:100%;max-width:380px;text-align:center"><div style="width:84px;height:84px;border-radius:50%;background:#22c99322;display:grid;place-items:center;margin:0 auto 18px"><svg width="46" height="46" viewBox="0 0 24 24" fill="none" stroke="#22c993" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div><h2 style="font-size:24px;margin-bottom:10px">${title}</h2><p style="color:var(--mut);font-size:16px;line-height:1.45;margin-bottom:22px">${body}</p><button class="btn">${btn}</button></div>`;
+function modal(title,body,btn,cb,icon,bg){const o=document.createElement("div");o.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:30;display:flex;align-items:center;justify-content:center;padding:20px";
+ const ic=icon||'<svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#22c993" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+ o.innerHTML=`<div style="background:var(--card);border:1px solid var(--line);border-radius:34px;padding:42px 28px 28px;width:100%;max-width:460px;text-align:center"><div style="width:124px;height:124px;border-radius:50%;background:${bg||"#22c99322"};display:grid;place-items:center;margin:0 auto 26px">${ic}</div><h2 style="font-size:28px;line-height:1.2;margin-bottom:14px">${title}</h2><p style="color:var(--mut);font-size:18px;line-height:1.5;margin-bottom:30px">${body}</p><button class="btn" style="padding:20px;font-size:19px">${btn}</button></div>`;
  o.querySelector("button").onclick=()=>{o.remove();cb&&cb()};document.body.appendChild(o)}
 const rate=()=>S.cat.rate||0.108;
 function toast(m){const d=document.createElement("div");d.textContent=m;d.style.cssText="position:fixed;top:70px;left:50%;transform:translateX(-50%);background:#22c993;color:#fff;padding:10px 18px;border-radius:14px;z-index:20;font-weight:700";document.body.appendChild(d);setTimeout(()=>d.remove(),1500)}
@@ -77,8 +78,8 @@ function payv(){const p=S.pay||{};
 function pickF(el){const f=el.files[0];if(!f)return;if(f.size>5*1024*1024)return alert("5MB");if(S.prev)URL.revokeObjectURL(S.prev);S.prev=URL.createObjectURL(f);S.file=f;render()}
 function toJpeg(f){return new Promise((ok,no)=>{const im=new Image();im.onload=()=>{const k=Math.min(1,1280/Math.max(im.width,im.height)),c=document.createElement("canvas");c.width=im.width*k;c.height=im.height*k;c.getContext("2d").drawImage(im,0,0,c.width,c.height);ok(c.toDataURL("image/jpeg",.8))};im.onerror=no;im.src=URL.createObjectURL(f)})}
 async function sendRc(){const b=document.querySelector(".btn");b.disabled=true;
-  try{const img=await toJpeg(S.file);const r=await api("/api/receipt",{id:S.pay.id,method:S.pay.method,image:img});
-    if(r?.ok){modal(t("rcpt_title"),t("rcpt_body"),t("gotit"),()=>{S.file=null;S.amt=0;go("menu")})}else{alert(t("err"));b.disabled=false}}catch(e){alert(t("err"));b.disabled=false}}
+  try{const img=await toJpeg(S.file);const r=await api("/api/receipt",{amount:S.pay.amount,method:S.pay.method,image:img});
+    if(r?.ok){modal(t("rcpt_title"),t("rcpt_body"),t("gotit"),()=>{S.file=null;S.amt=0;go("menu")},'<span style="font-size:68px;line-height:1">⏳</span>',"#f59e0b24")}else{alert(t("err"));b.disabled=false}}catch(e){alert(t("err"));b.disabled=false}}
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 async function openReviews(){const r=await api("/api/reviews");if(r&&r.items)S.rv=r;S.rf={s:0,g:"",o:"new"};go("rev")}
 function setRf(k,v){S.rf[k]=v;render()}
