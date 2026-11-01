@@ -19,7 +19,8 @@ for _s in ("CREATE TABLE IF NOT EXISTS ratings(oid INTEGER PRIMARY KEY,uid INTEG
            "ALTER TABLE ratings ADD COLUMN text TEXT DEFAULT ''",
            "ALTER TABLE ratings ADD COLUMN reply TEXT DEFAULT ''",
            "ALTER TABLE ratings ADD COLUMN ts TEXT",
-           "ALTER TABLE topups ADD COLUMN method TEXT DEFAULT ''"):
+           "ALTER TABLE topups ADD COLUMN method TEXT DEFAULT ''",
+           "UPDATE topups SET status='expired' WHERE status='pending' AND (method IS NULL OR method='')"):
     try: D.q(_s)
     except Exception: pass
 
@@ -167,6 +168,13 @@ for _l, _d in _T3.items(): T[_l].update(_d)
 async def tell(uid, key, **kw):
     try: await bot.send_message(uid, T[lang_of(uid)][key].format(**kw), parse_mode="HTML")
     except Exception: logging.exception("tell failed")
+_T4 = {
+ "tg": dict(ordrej="❌ <b>Фармоиши шумо рад карда шуд.</b>\n\n🏷 Фармоиш: #{no}\n💰 <b>+{amt} сомонӣ</b> ба балансатон баргардонида шуд.\nАгар хато шуда бошад, ба дастгирӣ нависед."),
+ "ru": dict(ordrej="❌ <b>Ваш заказ отклонён.</b>\n\n🏷 Заказ: #{no}\n💰 <b>+{amt} сомони</b> возвращено на ваш баланс.\nЕсли это ошибка, напишите в поддержку."),
+ "uz": dict(ordrej="❌ <b>Buyurtmangiz rad etildi.</b>\n\n🏷 Buyurtma: #{no}\n💰 <b>+{amt} somoni</b> balansingizga qaytarildi.\nXato bo'lgan bo'lsa, yordamga yozing."),
+ "en": dict(ordrej="❌ <b>Your order was declined.</b>\n\n🏷 Order: #{no}\n💰 <b>+{amt} TJS</b> has been returned to your balance.\nIf this is a mistake, contact support."),
+}
+for _l, _d in _T4.items(): T[_l].update(_d)
 PEND = {}
 def shop_kb(l):
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=W[l]["shop"], web_app=WebAppInfo(url=C.MINIAPP_URL))]])
@@ -250,6 +258,37 @@ async def text_in(m: Message):
             except Exception: pass
             await m.answer("✅ Sent")
 
+@dp.callback_query(F.data.regexp(r"^(od|or)\d+$"))
+async def order_decide(c: CallbackQuery):
+    if c.from_user.id != C.ADMIN_ID: return await c.answer()
+    oid = int(c.data[2:]); okay = c.data.startswith("od"); done = False
+    if okay:
+        if D.q("UPDATE orders SET status='done' WHERE id=? AND status='pending'", (oid,)).rowcount:
+            o = D.q("SELECT * FROM orders WHERE id=?", (oid,)).fetchone(); done = True; await notify(o["uid"], "done", o)
+    else:
+        o = D.cancel_order(oid)
+        if o: done = True; await tell(o["uid"], "ordrej", no=oid, amt=f"{o['price']:.2f}")
+    try:
+        if done: await c.message.edit_text((c.message.html_text or "") + ("\n\n✅ <b>Bajarildi</b>" if okay else "\n\n❌ <b>Rad etildi (pul qaytarildi)</b>"), parse_mode="HTML")
+        else: await c.message.edit_reply_markup()
+    except Exception: pass
+    await c.answer("OK" if done else "—")
+
+@dp.message(Command("pending"))
+async def pending_cmd(m: Message):
+    if m.from_user.id != C.ADMIN_ID: return
+    rows = D.q("SELECT o.*, u.name uname FROM orders o JOIN users u ON u.id=o.uid WHERE o.status='pending' ORDER BY o.id LIMIT 20").fetchall()
+    n = D.q("SELECT COUNT(*) c FROM topups WHERE status='pending'").fetchone()["c"]
+    await m.answer(f"⏳ Kutilayotgan buyurtmalar: {len(rows)}\n⏳ Kutilayotgan to'lovlar: {n} (ularning cheki o'z xabarida, tugmalari bilan)")
+    for o in rows:
+        prod = (o["title"] or "")[len(o["game"] or ""):].strip() or (o["item"] or "")
+        await m.answer(order_caption(o["id"], o["game"] or "", prod, o["pid"], o["price"], o["uid"], o["uname"] or "—", "—", to_local(o["ts"])), parse_mode="HTML", reply_markup=order_kb(o["id"]))
+
+async def on_error(event):
+    logging.exception("bot error: %s", getattr(event, "exception", event)); return True
+try: dp.error()(on_error)
+except Exception: logging.warning("error handler not registered")
+
 # ---------- API ----------
 def check_init(raw: str):
     """Telegram initData imzosini tekshiradi (soxta so'rovlardan himoya)."""
@@ -262,21 +301,33 @@ def check_init(raw: str):
         return json.loads(d["user"])
     except Exception: return None
 
-hits = {}
+hits = {}; whits = {}
+def _rl(store, k, lim):
+    now = time.time(); store[k] = [x for x in store.get(k, []) if now - x < 60] + [now]
+    return len(store[k]) > lim
 @web.middleware
 async def mw(req, handler):
-    if req.method == "OPTIONS": r = web.Response()
-    else:
-        if req.path.startswith("/api/") and req.path != "/api/catalog":
-            u = check_init(req.headers.get("X-Init", ""))
-            if not u: return web.json_response({"error": "auth"}, status=401, headers=cors())
-            req["u"] = D.user(u["id"], u.get("first_name", "")); req["tg"] = u
-            k = u["id"]; now = time.time()  # rate limit: 30 so'rov/daqiqa
-            hits[k] = [x for x in hits.get(k, []) if now - x < 60] + [now]
-            if len(hits[k]) > 30: return web.json_response({"error": "rate"}, status=429, headers=cors())
-        r = await handler(req)
+    try:
+        if req.method == "OPTIONS": r = web.Response()
+        else:
+            if req.path.startswith("/api/") and req.path != "/api/catalog":
+                u = check_init(req.headers.get("X-Init", ""))
+                if not u: return web.json_response({"error": "auth"}, status=401, headers=cors())
+                req["u"] = D.user(u["id"], u.get("first_name", "")); req["tg"] = u
+                # so'rovlar cheklovi: umumiy 60/daq, buyurtma/to'lov 12/daq
+                if _rl(hits, u["id"], 60) or (req.method == "POST" and _rl(whits, u["id"], 12)):
+                    return web.json_response({"error": "rate"}, status=429, headers=cors())
+            r = await handler(req)
+    except web.HTTPException: raise
+    except Exception:
+        logging.exception("api error: %s", req.path)
+        return web.json_response({"error": "server"}, status=500, headers=cors())
     r.headers.update(cors()); return r
-def cors(): return {"Access-Control-Allow-Origin": C.ORIGIN, "Access-Control-Allow-Headers": "Content-Type,X-Init", "Access-Control-Allow-Methods": "GET,POST,OPTIONS"}
+def cors():
+    if not C.ORIGIN or C.ORIGIN == "*": return {}   # Mini App shu serverning o'zida, CORS kerak emas
+    return {"Access-Control-Allow-Origin": C.ORIGIN, "Access-Control-Allow-Headers": "Content-Type,X-Init", "Access-Control-Allow-Methods": "GET,POST,OPTIONS"}
+async def _sec(req, resp):
+    resp.headers["X-Content-Type-Options"] = "nosniff"; resp.headers["Referrer-Policy"] = "no-referrer"
 
 async def catalog(r): return web.json_response({**C.CATALOG, "bot": (await bot.me()).username, "support": C.SUPPORT, "rate": C.RATE, "pay": [{k: x[k] for k in ("id", "name", "type", "cur", "color", "icon")} for x in C.PAY]})
 async def me(r):
@@ -287,23 +338,43 @@ async def lang(r):
     l = (await r.json()).get("lang")
     if l in ("ru", "uz", "tg", "en"): D.q("UPDATE users SET lang=?, lang_set=1 WHERE id=?", (l, r["u"]["id"]))
     return web.json_response({"ok": True})
+def now_s(): return datetime.now(timezone(timedelta(hours=C.TZ_HOURS))).strftime("%d.%m.%Y %H:%M")
+def to_local(ts):
+    try: return datetime.strptime(ts, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc).astimezone(timezone(timedelta(hours=C.TZ_HOURS))).strftime("%d.%m.%Y %H:%M")
+    except Exception: return str(ts or "—")
+def order_caption(oid, game, product, pid, price, uid, full, un, when):
+    e = H.escape
+    return (f"🛒 <b>Buyurtma #{oid}</b>\n🎮 O'yin: <b>{e(game)}</b>\n📦 Mahsulot: <b>{e(product)}</b>\n🆔 O'yinchi ID: <code>{e(str(pid))}</code>\n💰 Summa: <b>{price:g} somoni</b>\n"
+            f"👤 Ism: {e(full)}\n🔗 Username: {e(un)}\n🆔 Telegram ID: <code>{uid}</code>\n🕒 Vaqt: {when}")
+def order_kb(oid):
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✅ Bajarildi", callback_data=f"od{oid}"), InlineKeyboardButton(text="❌ Rad etish", callback_data=f"or{oid}")]])
 async def order(r):
-    d = await r.json(); g, i = C.find_item(d.get("game"), d.get("item"))
-    pid = str(d.get("pid", ""))
-    if not i or not pid.isdigit(): return web.json_response({"error": "bad"})
-    title = f"{g['name']} {i['name']}" + (f" [{d.get('region')}]" if g.get("regions") else "")
-    oid = D.buy(r["u"]["id"], title, pid, i["price"], g["name"], i["name"])  # narx serverdan olinadi
+    d = await r.json(); uid = r["u"]["id"]; tg = r["tg"]
+    g, i = C.find_item(d.get("game"), d.get("item"))
+    pid = str(d.get("pid", "")).strip()
+    if not i or not (pid.isdigit() and 5 <= len(pid) <= 14): return web.json_response({"error": "bad"})
+    region = ""
+    if g.get("regions"): region = d.get("region") if d.get("region") in g["regions"] else g["regions"][0]
+    product = i["name"] + (f" [{region}]" if region else "")
+    oid = D.buy(uid, f"{g['name']} {product}", pid, i["price"], g["name"], i["name"])  # narx serverdan olinadi
+    if oid == -1: return web.json_response({"error": "pending"})
     if not oid: return web.json_response({"error": "funds"})
-    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✅ Done", callback_data=f"done{oid}")]])
-    await bot.send_message(C.ADMIN_ID, f"🛒 #{oid}\n{title}\nID: {pid}\nUser: {r['u']['id']}", reply_markup=kb)
-    await notify(r["u"]["id"], "acc", D.q("SELECT * FROM orders WHERE id=?", (oid,)).fetchone())
-    return web.json_response({"ok": True, "balance": round(D.user(r["u"]["id"])["balance"], 2)})
+    full = f"{tg.get('first_name', '')} {tg.get('last_name', '')}".strip() or "—"
+    un = f"@{tg['username']}" if tg.get("username") else "—"
+    try:
+        await bot.send_message(C.ADMIN_ID, order_caption(oid, g["name"], product, pid, i["price"], uid, full, un, now_s()), parse_mode="HTML", reply_markup=order_kb(oid))
+    except Exception:
+        logging.exception("order: admin send failed"); D.cancel_order(oid)   # pul qaytariladi
+        return web.json_response({"error": "send"})
+    await notify(uid, "acc", D.q("SELECT * FROM orders WHERE id=?", (oid,)).fetchone())
+    return web.json_response({"ok": True, "balance": round(D.user(uid)["balance"], 2)})
 async def topup(r):
     d = await r.json()
     try: a = float(d.get("amount", 0))
     except Exception: a = 0
     x = next((p for p in C.PAY if p["id"] == d.get("method")), None)
     if not x or not 10 <= a <= 5000: return web.json_response({"error": "bad"})
+    if D.has_pending(r["u"]["id"]): return web.json_response({"error": "pending"})
     pa = a if x["cur"] == "TJS" else round(a / C.RATE)
     return web.json_response({"ok": True, "id": 0, "amount": a, "pay": pa, "cur": x["cur"], "type": x["type"], "value": x["value"], "holder": x["holder"], "name": x["name"], "icon": x["icon"], "color": x["color"], "method": x["id"]})
 async def receipt_api(r):
@@ -315,9 +386,8 @@ async def receipt_api(r):
     except Exception: raw = b""
     if not x or not 10 <= a <= 5000 or not 1000 < len(raw) < 6_000_000 or not (raw[:3] == b"\xff\xd8\xff" or raw[:4] == b"\x89PNG"):
         return web.json_response({"error": "bad"})
-    if D.q("SELECT COUNT(*) c FROM topups WHERE uid=? AND status='pending'", (uid,)).fetchone()["c"] >= 5:
-        return web.json_response({"error": "limit"})
-    tid = D.q("INSERT INTO topups(uid,amount,method) VALUES(?,?,?)", (uid, a, x["id"])).lastrowid
+    tid = D.add_topup(uid, a, x["id"])
+    if tid == -1: return web.json_response({"error": "pending"})
     e = H.escape
     when = datetime.now(timezone(timedelta(hours=C.TZ_HOURS))).strftime("%d.%m.%Y %H:%M")
     full = f"{tg.get('first_name', '')} {tg.get('last_name', '')}".strip() or "—"
@@ -344,7 +414,7 @@ async def top_api(r):
         rows = D.q(f"SELECT u.name, SUM(f.amount) s FROM fin f JOIN users u ON u.id=f.uid WHERE f.title='Top up' {w} GROUP BY f.uid ORDER BY s DESC LIMIT 20", a)
     else:
         w = "AND o.ts >= datetime('now', ?)" if cut else ""
-        rows = D.q(f"SELECT u.name, SUM(o.price) s FROM orders o JOIN users u ON u.id=o.uid WHERE 1=1 {w} GROUP BY o.uid ORDER BY s DESC LIMIT 20", a)
+        rows = D.q(f"SELECT u.name, SUM(o.price) s FROM orders o JOIN users u ON u.id=o.uid WHERE o.status!='cancelled' {w} GROUP BY o.uid ORDER BY s DESC LIMIT 20", a)
     return web.json_response({"items": [{"name": (x["name"] or "?")[:20], "total": round(x["s"] or 0, 2)} for x in rows]})
 async def history(r):
     uid = r["u"]["id"]; f = lambda x: (lambda s: f"{s[8:10]}.{s[5:7]}.{s[:4]} {s[11:16]}" if len(s) >= 16 else s)(str(x or ""))
@@ -358,6 +428,7 @@ def _img(path):
     return h
 async def main():
     app = web.Application(middlewares=[mw], client_max_size=8 * 1024 * 1024)
+    app.on_response_prepare.append(_sec)
     app.add_routes([web.get("/api/catalog", catalog), web.get("/api/me", me), web.post("/api/lang", lang), web.post("/api/order", order),
                     web.post("/api/topup", topup), web.post("/api/receipt", receipt_api), web.get("/api/history", history), web.get("/api/top", top_api), web.get("/api/reviews", reviews), web.route("OPTIONS", "/{p:.*}", lambda r: web.Response()),
                     web.get("/", lambda r: web.FileResponse(os.path.join(HERE, "index.html")))])

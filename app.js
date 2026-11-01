@@ -41,9 +41,12 @@ function game(){const g=S.game;if(!g)return"";
   <div class="grid3" style="grid-template-columns:1fr 1fr">${items.map(i=>`<div class="pk ${S.sel==i.id?"on":""}" onclick="S.sel='${i.id}';render()">${i.off?`<em>-${i.off}%</em>`:""}<b>${i.name}</b><span>${i.price} ${t("cur")}</span></div>`).join("")}</div>
   <div class="buy"><button class="btn" ${S.sel&&S.checked?"":"disabled"} onclick="buy()">${t("choose")}</button></div>`}
 function chk(){const v=$("#pid").value.trim();if(!/^\d{5,14}$/.test(v)){S.pid=v;return alert("ID?")}S.pid=v;S.checked=true;render()}
-async function buy(){const r=await api("/api/order",{game:S.game.id,item:S.sel,pid:S.pid,region:S.region});
+const pendModal=()=>modal(t("pend_title"),t("pend_body"),t("gotit"),()=>go("hist"),'<span style="font-size:68px;line-height:1">⏳</span>',"#f59e0b24");
+async function buy(){const bt=document.querySelector(".buy .btn");if(bt)bt.disabled=true;
+  const r=await api("/api/order",{game:S.game.id,item:S.sel,pid:S.pid,region:S.region});
+  if(r?.error=="pending"){if(bt)bt.disabled=false;return pendModal()}
   if(r?.error=="funds"){alert(t("nofunds"));return go("topup")}
-  if(r?.ok){S.u.balance=r.balance;alert(t("ordered"));go("hist")}else alert(t("err"))}
+  if(r?.ok){S.u.balance=r.balance;modal(t("ord_title"),t("ord_body"),t("gotit"),()=>go("hist"),'<span style="font-size:68px;line-height:1">⏳</span>',"#f59e0b24")}else{if(bt)bt.disabled=false;alert(t("err"))}}
 const CPY='<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#8b7bff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-left:6px"><rect x="9" y="9" width="12" height="12" rx="2.5"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg>';
 const pi=id=>`<img class="gimg" src="/${id}.png?v=6" onerror="this.style.display='none'">`;
 function modal(title,body,btn,cb,icon,bg){const o=document.createElement("div");o.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:30;display:flex;align-items:center;justify-content:center;padding:20px";
@@ -66,7 +69,7 @@ function toMeth(){if(!(S.amt>=10))return alert(t("min")+" 10 "+t("cur"));go("met
 function meth(){const rows=(S.cat.pay||[]).map(m=>{const amt=m.cur=="RUB"?Math.round(S.amt/rate())+" ₽":fmt(S.amt)+" "+t("cur");
   return `<div class="card" style="display:flex;justify-content:space-between;align-items:center;padding:14px 16px" onclick="pickM('${m.id}')"><div class="flex" style="align-items:center"><div class="av" style="background:${m.color};border-radius:14px;position:relative">${pi(m.id)}${m.icon}</div><div><b>${m.name}</b><br><small style="color:var(--mut)">${t(m.type=="card"?"bycard":"byphone")}</small></div></div><div style="text-align:right"><b style="color:#8b7bff">${amt}</b> ›</div></div>`}).join("");
   return `<a style="color:#8b7bff;font-weight:600" onclick="go('topup')">‹ ${t("changeamt")}</a><div class="lbl" style="margin-top:18px">${t("paymethod")}</div>${rows||`<p style="color:var(--mut)">—</p>`}`}
-async function pickM(id){const r=await api("/api/topup",{amount:S.amt,method:id});if(r?.ok){S.pay=r;S.file=null;go("pay")}else alert(t("err"))}
+async function pickM(id){const r=await api("/api/topup",{amount:S.amt,method:id});if(r?.ok){S.pay=r;S.file=null;go("pay")}else if(r?.error=="pending")pendModal();else alert(t("err"))}
 function payv(){const p=S.pay||{};
   return `<a style="color:#8b7bff;font-weight:600" onclick="go('meth')">‹ ${t("changemeth")}</a>
   <div class="card" style="margin-top:14px;text-align:center"><div class="lbl">${t("payto")}</div><div class="av" style="background:${p.color};border-radius:22px;width:96px;height:96px;margin:6px auto 14px;font-size:30px;position:relative">${pi(p.method)}${p.icon}</div>
@@ -79,7 +82,7 @@ function pickF(el){const f=el.files[0];if(!f)return;if(f.size>5*1024*1024)return
 function toJpeg(f){return new Promise((ok,no)=>{const im=new Image();im.onload=()=>{const k=Math.min(1,1280/Math.max(im.width,im.height)),c=document.createElement("canvas");c.width=im.width*k;c.height=im.height*k;c.getContext("2d").drawImage(im,0,0,c.width,c.height);ok(c.toDataURL("image/jpeg",.8))};im.onerror=no;im.src=URL.createObjectURL(f)})}
 async function sendRc(){const b=document.querySelector(".btn");b.disabled=true;
   try{const img=await toJpeg(S.file);const r=await api("/api/receipt",{amount:S.pay.amount,method:S.pay.method,image:img});
-    if(r?.ok){modal(t("rcpt_title"),t("rcpt_body"),t("gotit"),()=>{S.file=null;S.amt=0;go("menu")},'<span style="font-size:68px;line-height:1">⏳</span>',"#f59e0b24")}else{alert(t("err"));b.disabled=false}}catch(e){alert(t("err"));b.disabled=false}}
+    if(r?.ok){modal(t("rcpt_title"),t("rcpt_body"),t("gotit"),()=>{S.file=null;S.amt=0;go("menu")},'<span style="font-size:68px;line-height:1">⏳</span>',"#f59e0b24")}else if(r?.error=="pending"){pendModal();b.disabled=false}else{alert(t("err"));b.disabled=false}}catch(e){alert(t("err"));b.disabled=false}}
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 async function openReviews(){const r=await api("/api/reviews");if(r&&r.items)S.rv=r;S.rf={s:0,g:"",o:"new"};go("rev")}
 function setRf(k,v){S.rf[k]=v;render()}
@@ -136,7 +139,7 @@ function hist(){const H=S.hist,tab=S.htab||"orders";
     return head+chips([["all","st_all"],["done","st_done"],["pending","st_wait"],["cancelled","st_cancel"]],"hf",f)+(rows||none)}
   const inc=H.fin.filter(x=>x.amount>0).reduce((a,x)=>a+x.amount,0),exp=H.fin.filter(x=>x.amount<0).reduce((a,x)=>a-x.amount,0),f=S.ff||"all";
   const sum=(ic,col,lb,val,sg)=>`<div class="card" style="margin:0"><div class="sm" style="color:${col};display:flex;gap:6px;align-items:center;margin:0">${I(ic,18)}${t(lb)}</div><div style="font-size:28px;font-weight:800;color:${col};margin:10px 0 2px">${sg}${fmt(val)}</div><small style="color:var(--mut)">${t("cur")}</small></div>`;
-  const rows=H.fin.filter(x=>f=="all"||(f=="in"?x.amount>0:x.amount<0)).map(x=>{const pos=x.amount>0,ti=x.title=="Top up"?t("fin_topup"):x.title=="Referral bonus"?t("fin_ref"):x.title;
+  const rows=H.fin.filter(x=>f=="all"||(f=="in"?x.amount>0:x.amount<0)).map(x=>{const pos=x.amount>0,ti=x.title=="Top up"?t("fin_topup"):x.title=="Referral bonus"?t("fin_ref"):x.title=="Refund"?t("fin_refund"):x.title;
     return `<div class="oc" style="border-left-width:1px"><div class="oi" style="background:${pos?"#10302a":"#321a1f"};color:${pos?"var(--ok)":"var(--bad)"}">${I(pos?"down":"up",24)}</div><div style="flex:1;min-width:0"><b class="tr">${esc(ti)}</b><div class="sm">${x.date}</div></div><b class="${pos?"ok":"bad"}" style="flex:none">${pos?"+":""}${fmt(x.amount)} ${t("cur")}</b></div>`}).join("");
   return head+`<div class="row3" style="grid-template-columns:1fr 1fr;margin-bottom:16px">${sum("tup","var(--ok)","total_income",inc,"+")}${sum("tdn","var(--bad)","total_expense",exp,"-")}</div>`+chips([["all","st_all"],["in","income"],["out","expense"]],"ff",f)+(rows||none)}
 function friends(){const l=`https://t.me/${S.cat.bot}?start=${S.u.ref}`,c=(a,b)=>`<div class="card" style="text-align:center;margin:0"><h2>${a}</h2><small>${b}</small></div>`,tl=(ic,bg,col,k,fn)=>`<div class="card" style="margin:0;text-align:center" onclick="${fn}"><div class="ti" style="background:${bg};color:${col};margin:0 auto 8px">${I(ic,22)}</div><b style="font-size:14px">${t(k)}</b></div>`;
