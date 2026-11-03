@@ -54,3 +54,4 @@ DONATIX_URL = os.getenv("DONATIX_URL", "https://donatix.tj/api/v1").rstrip("/")
 USD_TJS = float(os.getenv("USD_TJS", "0") or 0)             # 1 USD = ? somoni (tannarx tekshiruvi uchun, ixtiyoriy)
 DX_MIN_BALANCE = float(os.getenv("DX_MIN_BALANCE", "5") or 5)  # Donatix balansi shundan kam bo'lsa ogohlantiradi (USD)
 DX_CATEGORIES = {"freefire": "free_fire", "pubg": "pubg_mobile", "mlbb": "mobile_legends", **_jenv("DX_CATEGORIES")}
+DX_QUERIES = {"freefire": "ff", "pubg": "pubg", "mlbb": "mobile legends", **_jenv("DX_QUERIES")}   # Donatix qidiruv so'zi (o'yin id -> matn)

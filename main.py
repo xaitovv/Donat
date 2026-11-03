@@ -321,11 +321,14 @@ async def dx_resume(m: Message):
     if m.from_user.id == C.ADMIN_ID: DXSTATE["on"] = True; await m.answer("▶ Avto yoqildi.")
 
 @dp.message(Command("dxcats"))
-async def dx_cats(m: Message):
+async def dx_cats(m: Message, command: CommandObject):
     if m.from_user.id != C.ADMIN_ID or not DX.enabled(): return
     cats = await DX.categories()
     if not cats: return await m.answer("Kategoriyalar olinmadi.\n" + H.escape(DX.last_error_text()))
-    await say_chunks(m, [f"<code>{H.escape(str(c.get('category_id') or c.get('id')))}</code> — {H.escape(str(c.get('name') or c.get('title') or ''))}" for c in cats[:80]])
+    f = (command.args or "").strip().lower()
+    if f: cats = [c for c in cats if f in str(c.get("category_id") or c.get("id") or "").lower() or f in str(c.get("name") or c.get("title") or "").lower()]
+    if not cats: return await m.answer("Mos kategoriya yo'q. Boshqa so'z bilan urinib ko'ring: /dxcats free")
+    await say_chunks(m, [f"<code>{H.escape(str(c.get('category_id') or c.get('id')))}</code> — {H.escape(str(c.get('name') or c.get('title') or ''))}" for c in cats[:60]])
 
 @dp.message(Command("dxfind"))
 async def dx_find(m: Message, command: CommandObject):
@@ -357,7 +360,12 @@ async def dx_auto(m: Message, command: CommandObject):
     if not g: return await m.answer("Ishlatish: /dxauto o'yin_id [kategoriya_id]\nO'yinlar: " + ", ".join(x["id"] for x in C.CATALOG["games"]))
     cat = a[1] if len(a) > 1 else C.DX_CATEGORIES.get(g["id"])
     prods = await DX.products(category=cat)
-    if not prods: return await m.answer("Mahsulot topilmadi. /dxcats bilan kategoriya idsini tekshiring.\n" + H.escape(DX.last_error_text()), parse_mode="HTML")
+    if not prods:   # kategoriya id noto'g'ri bo'lsa, qidiruv orqali topamiz
+        found = await DX.products(q=(a[1] if len(a) > 1 else C.DX_QUERIES.get(g["id"], g["name"])))
+        cats = sorted({str(p.get("category_id")) for p in found})
+        if len(cats) == 1: prods = found
+        elif cats: return await m.answer("Bir nechta kategoriya topildi:\n" + "\n".join(cats[:25]) + f"\n\nBittasini tanlab yozing: /dxauto {g['id']} kategoriya_id")
+    if not prods: return await m.answer("Mahsulot topilmadi. /dxcats ff kabi yozib kategoriya idsini toping.\n" + H.escape(DX.last_error_text()), parse_mode="HTML")
     def qty(p):
         mm = re.search(r"\d+", str(p.get("name") or p.get("title") or "")); return int(mm.group()) if mm else None
     idx = {}
@@ -373,6 +381,9 @@ async def dx_auto(m: Message, command: CommandObject):
                 if p and p.get("product_id"): D.dx_set(it["id"], rg, p["product_id"]); ok += 1
                 else: miss.append(f"{it['id']} {rg}".strip())
     await m.answer(f"✅ Bog'landi: {ok}\n❌ Topilmadi: {len(miss)}\n" + ", ".join(miss[:50]) + "\n\nTopilmaganlarni /dxfind va /dxset bilan qo'lda bog'lang. Narxlarni /dxfind da tekshiring!")
+    if ok == 0:   # paket o'lchamlari mos kelmadi (masalan Donatix 100, bizda 110): Donatix ro'yxatini ko'rsatamiz
+        await m.answer("ℹ️ Donatix'dagi paketlar (bizniki bilan o'lchami farq qilishi mumkin):", parse_mode="HTML")
+        await say_chunks(m, [pline(p) for p in prods[:30]])
 
 async def on_error(event):
     logging.exception("bot error: %s", getattr(event, "exception", event)); return True
@@ -441,7 +452,7 @@ async def check_id(game, pid, region=""):
     """('ok', nik) = topildi | ('noid', '') = bunday ID yo'q | ('unv', '') = tekshirib bo'lmadi (API yo'q yoki xato)."""
     if DX.enabled() and DXSTATE["on"]:
         gg = next((x for x in C.CATALOG["games"] if x["id"] == game), None)
-        sku = dx_sku_any(gg, region) if gg else None
+        sku = (dx_sku_any(gg, region) or await dx_discover(gg, region)) if gg else None
         if sku:
             key = (game, pid, region); now = time.time(); c = CHK.get(key)
             if c and now - c[0] < 600: return c[1], c[2]
@@ -498,6 +509,25 @@ def dx_sku_any(g, region):
             s = D.dx_get(it["id"], region or "") or D.dx_get(it["id"], "")
             if s: return s
     return None
+DISC = {}
+async def dx_discover(g, region):
+    """Bog'lash qilinmagan bo'lsa ham ID tekshirish ishlashi uchun: Donatix'dan shu o'yin (va region) uchun bitta mahsulotni o'zi topadi."""
+    if not (DX.enabled() and DXSTATE["on"]): return None
+    key = (g["id"], region or ""); c = DISC.get(key)
+    if c and time.time() - c[0] < (3600 if c[1] else 300): return c[1]
+    prods = [p for p in await DX.products(q=C.DX_QUERIES.get(g["id"], g["name"]), pages=1, limit=100) if p.get("product_id")]
+    nz = lambda s: re.sub(r"[^a-z0-9]", "", str(s or "").lower())
+    keys = [k for k in (nz(g["name"]), nz(C.DX_CATEGORIES.get(g["id"], ""))) if k]
+    qk = nz(C.DX_QUERIES.get(g["id"], ""))
+    # faqat shu o'yinga tegishli mahsulotlar (boshqa o'yinniki bilan adashmaslik uchun)
+    mine = [p for p in prods if any(nz(p.get("category_id")).startswith(k) for k in keys) or (qk and nz(p.get("category_name")) == qk)]
+    rg = (region or "").upper()
+    pick = (next((p for p in mine if str(p.get("region") or "").upper() == rg and rg), None)
+            or next((p for p in mine if str(p.get("region") or "").upper() in ("", "GLOBAL")), None)
+            or (mine[0] if mine else None))
+    sku = pick["product_id"] if pick else None
+    DISC[key] = (time.time(), sku)
+    return sku
 async def admin_say(text, kb=None):
     try: await bot.send_message(C.ADMIN_ID, text, parse_mode="HTML", reply_markup=kb)
     except Exception: logging.exception("admin_say failed")
