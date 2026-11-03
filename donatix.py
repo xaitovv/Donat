@@ -2,11 +2,11 @@
 import asyncio, json, logging, time, urllib.request, urllib.error
 import config as C
 
-_CACHE = {}
+_CACHE = {}; LAST = {}
 def enabled(): return bool(C.DONATIX_KEY)
 
 def _req(method, path, body, headers):
-    h = {"X-API-Key": C.DONATIX_KEY, "Accept": "application/json", "User-Agent": "diavex-bot", **headers}
+    h = {"X-API-Key": C.DONATIX_KEY, "Accept": "application/json", "User-Agent": "Mozilla/5.0 (compatible; DiavexBot/1.0)", **headers}
     data = None
     if body is not None:
         data = json.dumps(body).encode(); h["Content-Type"] = "application/json"
@@ -21,8 +21,11 @@ async def call(method, path, body=None, headers=None):
     try: st, raw = await asyncio.to_thread(_req, method, path, body, headers or {})
     except Exception as e:
         logging.warning("donatix network error: %s", e); return 0, None
-    try: return st, json.loads(raw.decode("utf-8", "replace"))
-    except Exception: return st, None
+    try: data = json.loads(raw.decode("utf-8", "replace"))
+    except Exception: data = None
+    if st != 200 or (isinstance(data, dict) and data.get("ok") is False):
+        LAST["err"] = (method, path.split("?")[0], st, err_code(data), str((data or {}).get("error") or "")[:160] if isinstance(data, dict) else raw[:120].decode("utf-8", "replace"))
+    return st, data
 
 def err_code(d):
     return str((d or {}).get("code") or "") if isinstance(d, dict) else ""
@@ -76,3 +79,16 @@ async def create_order(sku, player_id, key):
 
 async def order_status(dx_id):
     return await call("GET", f"/orders/{urllib.request.quote(str(dx_id))}")
+
+def hint(st, code=""):
+    if st == 0: return "Donatix'ga ulanib bo'lmadi (tarmoq xatosi yoki manzil noto'g'ri). DONATIX_URL ni tekshiring."
+    if st == 401: return "Kalit noto'g'ri, to'liq emas yoki o'chirilgan. Donatix'da «Скопировать» bilan kalitni TO'LIQ nusxalab, Render'dagi DONATIX_KEY ni almashtiring."
+    if st == 403: return "Kirish taqiqlangan (hisob/IP bloklangan yoki himoya tizimi)."
+    if st == 429: return "So'rovlar ko'p yoki IP vaqtincha bloklangan. 15 daqiqa kuting."
+    if st >= 500: return "Donatix serverida muammo, keyinroq urinib ko'ring."
+    return "Javob kutilgan ko'rinishda emas."
+def last_error_text():
+    e = LAST.get("err")
+    if not e: return ""
+    m, p, st, code, msg = e
+    return f"{m} {p} → HTTP {st} {code} {msg}".strip()

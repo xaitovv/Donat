@@ -304,9 +304,14 @@ def pline(p):
 async def dx_cmd(m: Message):
     if m.from_user.id != C.ADMIN_ID: return
     if not DX.enabled(): return await m.answer("Donatix ulanmagan (Render'da DONATIX_KEY yo'q).")
-    b = await DX.balance()
+    st, bd = await DX.call("GET", "/balance")
+    if st == 200 and bd and bd.get("ok"):
+        try: bal_txt = "$%.2f" % float(bd["balance"])
+        except Exception: bal_txt = "javob tushunarsiz"
+    else:
+        bal_txt = f"❌ HTTP {st} {H.escape(DX.err_code(bd))}\n👉 {H.escape(DX.hint(st, DX.err_code(bd)))}"
     pr = D.q("SELECT COUNT(*) c FROM orders WHERE status='processing'").fetchone()["c"]
-    await m.answer(f"🤖 Donatix avto: <b>{'yoqilgan' if DXSTATE['on'] else 'to‘xtatilgan'}</b>\n💰 Balans: {('$%.2f' % b) if b is not None else 'olib bo‘lmadi'}\n🔗 Bog'langan mahsulotlar: {D.dx_count()}\n⏳ Jarayondagi buyurtmalar: {pr}\n\n/dxcats · /dxfind matn · /dxauto o'yin_id · /dxset item region id · /dxpause · /dxresume", parse_mode="HTML")
+    await m.answer(f"🤖 Donatix avto: <b>{'yoqilgan' if DXSTATE['on'] else 'to‘xtatilgan'}</b>\n💰 Balans: {bal_txt}\n🔗 Bog'langan mahsulotlar: {D.dx_count()}\n⏳ Jarayondagi buyurtmalar: {pr}\n\n/dxcats · /dxfind matn · /dxauto o'yin_id · /dxset item region id · /dxpause · /dxresume", parse_mode="HTML")
 
 @dp.message(Command("dxpause"))
 async def dx_pause(m: Message):
@@ -319,7 +324,7 @@ async def dx_resume(m: Message):
 async def dx_cats(m: Message):
     if m.from_user.id != C.ADMIN_ID or not DX.enabled(): return
     cats = await DX.categories()
-    if not cats: return await m.answer("Kategoriyalar olinmadi.")
+    if not cats: return await m.answer("Kategoriyalar olinmadi.\n" + H.escape(DX.last_error_text()))
     await say_chunks(m, [f"<code>{H.escape(str(c.get('category_id') or c.get('id')))}</code> — {H.escape(str(c.get('name') or c.get('title') or ''))}" for c in cats[:80]])
 
 @dp.message(Command("dxfind"))
@@ -328,7 +333,7 @@ async def dx_find(m: Message, command: CommandObject):
     q = (command.args or "").strip()
     if not q: return await m.answer("Ishlatish: /dxfind ff")
     items = await DX.products(q=q, pages=1, limit=60)
-    if not items: return await m.answer("Hech narsa topilmadi.")
+    if not items: return await m.answer("Hech narsa topilmadi.\n" + H.escape(DX.last_error_text()), parse_mode="HTML")
     await say_chunks(m, [pline(p) for p in items])
 
 @dp.message(Command("dxset"))
@@ -352,7 +357,7 @@ async def dx_auto(m: Message, command: CommandObject):
     if not g: return await m.answer("Ishlatish: /dxauto o'yin_id [kategoriya_id]\nO'yinlar: " + ", ".join(x["id"] for x in C.CATALOG["games"]))
     cat = a[1] if len(a) > 1 else C.DX_CATEGORIES.get(g["id"])
     prods = await DX.products(category=cat)
-    if not prods: return await m.answer("Mahsulot topilmadi. /dxcats bilan kategoriya idsini tekshiring.")
+    if not prods: return await m.answer("Mahsulot topilmadi. /dxcats bilan kategoriya idsini tekshiring.\n" + H.escape(DX.last_error_text()), parse_mode="HTML")
     def qty(p):
         mm = re.search(r"\d+", str(p.get("name") or p.get("title") or "")); return int(mm.group()) if mm else None
     idx = {}
