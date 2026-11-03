@@ -31,20 +31,25 @@ function menu(){const u=S.u,tgu=tg?.initDataUnsafe?.user||{};
   <div class="row3"><div class="glass" onclick="go('topup')">💳<br>${t("topup")}</div><div class="glass" onclick="alert(t('nopromo'))">🎟<br>${t("bonus")}</div><div class="glass" onclick="tg&&tg.openTelegramLink('https://t.me/'+S.cat.support)">💬<br>${t("support")}</div></div></div>
   <div class="card" style="display:flex;align-items:center;gap:14px;padding:16px 18px" onclick="openReviews()"><div class="av" style="background:#3a3320;border-radius:14px;font-size:26px">⭐</div><div style="flex:1"><b style="font-size:24px">${(u.rating&&u.rating.count)?u.rating.avg.toFixed(1):"—"}</b> <span style="color:#facc15">★★★★★</span> <small style="color:var(--mut)">· ${(u.rating&&u.rating.count)||0} ${t("ratings_n")}</small></div><span style="color:var(--mut)">›</span></div>
   <div class="seg"><a class="${S.tab=="games"?"on":""}" onclick="S.tab='games';render()">${t("games")}</a><a class="${S.tab=="gift"?"on":""}" onclick="S.tab='gift';render()">Gift Code</a><a class="${S.tab=="ai"?"on":""}" onclick="S.tab='ai';render()">🤖 AI</a></div>${body}`}
-function openGame(id){S.game=S.cat.games.find(g=>g.id==id);S.sel=null;S.pid="";S.checked=false;S.ptab=Object.keys(S.game.tabs)[0];go("game")}
+function openGame(id){S.game=S.cat.games.find(g=>g.id==id);S.sel=null;S.pid="";S.checked=false;S.nick="";S.idmsg="";S.ptab=Object.keys(S.game.tabs)[0];go("game")}
 function game(){const g=S.game;if(!g)return"";
   const tabs=Object.keys(g.tabs),items=g.tabs[S.ptab]||[];
   const regs=g.regions?`<div class="card"><div class="lbl">${t("region")}</div><div class="reg">${g.regions.map(r=>`<a class="${S.region==r?"on":""}" onclick="S.region='${r}';render()">${r}</a>`).join("")}</div></div>`:"";
   return `<div class="card top" style="margin:0 0 14px"><div class="av" style="background:${g.color};border-radius:14px;position:relative">${gi(g)}${g.icon}</div><div><b>${g.name}</b><br><small style="color:var(--mut)">${g.sub}</small></div></div>
-  <div class="card"><div class="lbl">${t("playerid")}</div>${S.checked?`<div class="li" style="padding:6px 0"><b class="ok">✓ ${S.pid}</b><a onclick="S.checked=false;render()" style="color:var(--mut)">${t("change")}</a></div>`:`<div class="flex"><input id="pid" inputmode="numeric" placeholder="${t("enterid")}" value="${S.pid}"><button class="btn" style="width:auto;padding:0 18px" onclick="chk()">${t("check")}</button></div>`}</div>
+  <div class="card"><div class="lbl">${t("playerid")}</div>${S.checked?`<div style="display:flex;align-items:center;gap:14px;background:#10302a;border:1px solid #1a5c4a;border-radius:20px;padding:14px 16px"><div style="width:48px;height:48px;border-radius:50%;background:#16463b;color:#22c993;display:grid;place-items:center;flex:none">${I("check",24)}</div><div style="flex:1;min-width:0">${S.nick?`<b class="tr" style="font-size:18px">«${esc(S.nick)}»</b><div class="ok" style="font-size:15px">${esc(S.pid)}</div>`:`<b style="font-size:18px">ID: ${esc(S.pid)}</b><div style="color:#f5a623;font-size:14px;margin-top:4px">⚠ ${t("id_unv")}</div>`}</div><a onclick="S.checked=false;S.nick='';render()" style="color:var(--mut);flex:none">${t("change")}</a></div>`:`<div class="flex"><input id="pid" inputmode="numeric" placeholder="${t("enterid")}" value="${esc(S.pid)}"><button class="btn" style="width:auto;padding:0 18px" ${S.checking?"disabled":""} onclick="chk()">${S.checking?t("checking"):t("check")}</button></div>${S.idmsg?`<div style="color:var(--bad);margin-top:10px;font-size:14px">${t(S.idmsg=="noid"?"id_bad":"id_fmt")}</div>`:""}`}</div>
   ${regs}<div class="lbl">${t("pick")}</div><div class="seg">${tabs.map(k=>`<a class="${S.ptab==k?"on":""}" onclick="S.ptab='${k}';S.sel=null;render()">${k}</a>`).join("")}</div>
   <div class="grid3" style="grid-template-columns:1fr 1fr">${items.map(i=>`<div class="pk ${S.sel==i.id?"on":""}" onclick="S.sel='${i.id}';render()">${i.off?`<em>-${i.off}%</em>`:""}<b>${i.name}</b><span>${i.price} ${t("cur")}</span></div>`).join("")}</div>
   <div class="buy"><button class="btn" ${S.sel&&S.checked?"":"disabled"} onclick="buy()">${t("choose")}</button></div>`}
-function chk(){const v=$("#pid").value.trim();if(!/^\d{5,14}$/.test(v)){S.pid=v;return alert("ID?")}S.pid=v;S.checked=true;render()}
+async function chk(){const v=$("#pid").value.trim();S.idmsg="";if(!/^\d{5,14}$/.test(v)){S.pid=v;S.idmsg="fmt";return render()}
+  S.pid=v;S.checking=true;render();
+  const r=await api(`/api/checkid?game=${S.game.id}&id=${v}&region=${S.region}`);S.checking=false;
+  if(r&&r.error=="noid"){S.idmsg="noid";return render()}
+  S.nick=(r&&r.nick)||"";S.checked=true;render()}
 const pendModal=()=>modal(t("pend_title"),t("pend_body"),t("gotit"),()=>go("hist"),'<span style="font-size:68px;line-height:1">⏳</span>',"#f59e0b24");
 async function buy(){const bt=document.querySelector(".buy .btn");if(bt)bt.disabled=true;
   const r=await api("/api/order",{game:S.game.id,item:S.sel,pid:S.pid,region:S.region});
   if(r?.error=="pending"){if(bt)bt.disabled=false;return pendModal()}
+  if(r?.error=="noid"){S.checked=false;S.nick="";S.idmsg="noid";return render()}
   if(r?.error=="funds"){alert(t("nofunds"));return go("topup")}
   if(r?.ok){S.u.balance=r.balance;modal(t("ord_title"),t("ord_body"),t("gotit"),()=>go("hist"),'<span style="font-size:68px;line-height:1">⏳</span>',"#f59e0b24")}else{if(bt)bt.disabled=false;alert(t("err"))}}
 const CPY='<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#8b7bff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-left:6px"><rect x="9" y="9" width="12" height="12" rx="2.5"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg>';
@@ -112,6 +117,7 @@ chat:'<path d="M20 12a8 8 0 0 1-11.6 7.1L4 20l1-4A8 8 0 1 1 20 12z"/>',
 star:'<path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.9-5.2-2.8-5.2 2.8 1-5.9-4.3-4.1 5.9-.8z"/>',
 shield:'<path d="M12 3l7.5 3v5.5c0 4.6-3.1 8-7.5 9.5-4.4-1.5-7.5-4.9-7.5-9.5V6z"/><path d="M9 12l2.2 2.2L15.5 10"/>',
 uplus:'<circle cx="10" cy="8" r="3.6"/><path d="M3.5 20c0-3.7 2.9-6 6.5-6 1.3 0 2.5.3 3.5.9"/><path d="M18 14v6M15 17h6"/>',
+check:'<path d="M5 12.5l4.5 4.5L19 7.5"/>',
 chev:'<path d="M9 6l6 6-6 6"/>',
 up:'<path d="M12 19V5M5.5 11.5L12 5l6.5 6.5"/>',
 down:'<path d="M12 5v14M5.5 12.5L12 19l6.5-6.5"/>',
@@ -126,7 +132,7 @@ wallet:'<path d="M4 7.5A2.5 2.5 0 0 1 6.5 5H18v3"/><rect x="3.5" y="8" width="17
 const I=(k,w=24)=>`<svg width="${w}" height="${w}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${P[k]}</svg>`;
 const ini=s=>esc([...String(s||"?")][0]||"?");
 const gid=n=>{const g=(S.cat.games||[]).find(x=>x.name==n);return g?g.id:""};
-const ST={done:"st_done",pending:"st_wait",cancelled:"st_cancel"};
+const ST={done:"st_done",pending:"st_wait",processing:"st_wait",cancelled:"st_cancel"};
 function setH(k,v){S[k]=v;render()}
 async function refreshHist(){const r=await api("/api/history");if(r){S.hist=r;render()}}
 function hist(){const H=S.hist,tab=S.htab||"orders";
@@ -135,7 +141,7 @@ function hist(){const H=S.hist,tab=S.htab||"orders";
   const chips=(arr,key,cur)=>`<div class="reg chips" style="margin:0 0 14px">${arr.map(([k,n])=>`<a class="${cur==k?"on":""}" onclick="setH('${key}','${k}')">${t(n)}</a>`).join("")}</div>`;
   const none=`<p style="color:var(--mut);text-align:center;margin-top:40px">—</p>`;
   if(tab=="orders"){const f=S.hf||"all";
-    const rows=H.orders.filter(x=>f=="all"||x.status==f).map(x=>{const g=gid(x.game);return `<div class="oc"><div class="oi">${g?pi(g):""}${x.game?ini(x.game):"🛒"}</div><div style="flex:1;min-width:0"><b class="tr">${esc(x.item||x.title)}</b><div class="sm">${esc(x.game||"")} · ${x.date}</div><div class="sm2">#${x.id}</div></div><div style="text-align:right;flex:none"><b>${fmt(x.price)} ${t("cur")}</b><br><span class="bd ${x.status}">${t(ST[x.status]||"st_wait")}</span></div></div>`}).join("");
+    const rows=H.orders.filter(x=>f=="all"||x.status==f||(f=="pending"&&x.status=="processing")).map(x=>{const g=gid(x.game);return `<div class="oc"><div class="oi">${g?pi(g):""}${x.game?ini(x.game):"🛒"}</div><div style="flex:1;min-width:0"><b class="tr">${esc(x.item||x.title)}</b><div class="sm">${esc(x.game||"")} · ${x.date}</div><div class="sm2">#${x.id}</div></div><div style="text-align:right;flex:none"><b>${fmt(x.price)} ${t("cur")}</b><br><span class="bd ${x.status}">${t(ST[x.status]||"st_wait")}</span></div></div>`}).join("");
     return head+chips([["all","st_all"],["done","st_done"],["pending","st_wait"],["cancelled","st_cancel"]],"hf",f)+(rows||none)}
   const inc=H.fin.filter(x=>x.amount>0).reduce((a,x)=>a+x.amount,0),exp=H.fin.filter(x=>x.amount<0).reduce((a,x)=>a-x.amount,0),f=S.ff||"all";
   const sum=(ic,col,lb,val,sg)=>`<div class="card" style="margin:0"><div class="sm" style="color:${col};display:flex;gap:6px;align-items:center;margin:0">${I(ic,18)}${t(lb)}</div><div style="font-size:28px;font-weight:800;color:${col};margin:10px 0 2px">${sg}${fmt(val)}</div><small style="color:var(--mut)">${t("cur")}</small></div>`;

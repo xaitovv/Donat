@@ -1,4 +1,6 @@
 import html as H
+import json as _json, urllib.request, urllib.error, urllib.parse
+import re
 from datetime import datetime, timezone, timedelta
 import logging
 logging.basicConfig(level=logging.INFO)
@@ -9,7 +11,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart, CommandObject
 from aiogram.types import (Message, CallbackQuery, InlineKeyboardMarkup,
                            InlineKeyboardButton, WebAppInfo, BufferedInputFile, FSInputFile)
-import config as C, database as D
+import config as C, database as D, donatix as DX
 
 # Baza tuzilmasini o'zi tekshiradi (database.py eski bo'lsa ham ishlayveradi)
 for _s in ("CREATE TABLE IF NOT EXISTS ratings(oid INTEGER PRIMARY KEY,uid INTEGER,stars INTEGER)",
@@ -19,6 +21,9 @@ for _s in ("CREATE TABLE IF NOT EXISTS ratings(oid INTEGER PRIMARY KEY,uid INTEG
            "ALTER TABLE ratings ADD COLUMN text TEXT DEFAULT ''",
            "ALTER TABLE ratings ADD COLUMN reply TEXT DEFAULT ''",
            "ALTER TABLE ratings ADD COLUMN ts TEXT",
+           "CREATE TABLE IF NOT EXISTS dxmap(item_id TEXT,region TEXT,product_id TEXT,PRIMARY KEY(item_id,region))",
+           "ALTER TABLE orders ADD COLUMN dx_id TEXT DEFAULT ''",
+           "ALTER TABLE orders ADD COLUMN nick TEXT DEFAULT ''",
            "ALTER TABLE topups ADD COLUMN method TEXT DEFAULT ''",
            "UPDATE topups SET status='expired' WHERE status='pending' AND (method IS NULL OR method='')"):
     try: D.q(_s)
@@ -188,6 +193,7 @@ def lang_of(uid):
     u = D.q("SELECT lang FROM users WHERE id=?", (uid,)).fetchone()
     return u["lang"] if u and u["lang"] in T else "ru"
 async def notify(uid, kind, o, nick=""):
+    nick = nick or (o["nick"] if "nick" in o.keys() else "")
     l = lang_of(uid); t = T[l]; e = H.escape
     nk = t["nick"].format(v=e(nick)) if nick else ""
     text = t[kind].format(item=e(o["item"] or o["title"]), game=e(o["game"] or ""), pid=e(str(o["pid"])), oid=o["id"], price=f"{o['price']:.2f}", cur=CUR[l], nick=nk)
@@ -279,10 +285,89 @@ async def pending_cmd(m: Message):
     if m.from_user.id != C.ADMIN_ID: return
     rows = D.q("SELECT o.*, u.name uname FROM orders o JOIN users u ON u.id=o.uid WHERE o.status='pending' ORDER BY o.id LIMIT 20").fetchall()
     n = D.q("SELECT COUNT(*) c FROM topups WHERE status='pending'").fetchone()["c"]
-    await m.answer(f"⏳ Kutilayotgan buyurtmalar: {len(rows)}\n⏳ Kutilayotgan to'lovlar: {n} (ularning cheki o'z xabarida, tugmalari bilan)")
+    pr = D.q("SELECT COUNT(*) c FROM orders WHERE status='processing'").fetchone()["c"]
+    await m.answer(f"⏳ Kutilayotgan buyurtmalar: {len(rows)}\n🤖 Avto jarayonda: {pr}\n⏳ Kutilayotgan to'lovlar: {n} (ularning cheki o'z xabarida, tugmalari bilan)")
     for o in rows:
         prod = (o["title"] or "")[len(o["game"] or ""):].strip() or (o["item"] or "")
-        await m.answer(order_caption(o["id"], o["game"] or "", prod, o["pid"], o["price"], o["uid"], o["uname"] or "—", "—", to_local(o["ts"])), parse_mode="HTML", reply_markup=order_kb(o["id"]))
+        await m.answer(order_caption(o["id"], o["game"] or "", prod, o["pid"], o["price"], o["uid"], o["uname"] or "—", "—", to_local(o["ts"]), o["nick"] or ""), parse_mode="HTML", reply_markup=order_kb(o["id"]))
+
+async def say_chunks(m, lines):
+    buf = ""
+    for ln in lines:
+        if len(buf) + len(ln) > 3500: await m.answer(buf, parse_mode="HTML"); buf = ""
+        buf += ln + "\n"
+    if buf: await m.answer(buf, parse_mode="HTML")
+def pline(p):
+    return f"<code>{H.escape(str(p.get('product_id')))}</code> · {H.escape(str(p.get('category_id', '')))} {H.escape(str(p.get('region', '')))} · {H.escape(str(p.get('name') or p.get('title')))} · ${p.get('price_usd')}"
+
+@dp.message(Command("dx"))
+async def dx_cmd(m: Message):
+    if m.from_user.id != C.ADMIN_ID: return
+    if not DX.enabled(): return await m.answer("Donatix ulanmagan (Render'da DONATIX_KEY yo'q).")
+    b = await DX.balance()
+    pr = D.q("SELECT COUNT(*) c FROM orders WHERE status='processing'").fetchone()["c"]
+    await m.answer(f"🤖 Donatix avto: <b>{'yoqilgan' if DXSTATE['on'] else 'to‘xtatilgan'}</b>\n💰 Balans: {('$%.2f' % b) if b is not None else 'olib bo‘lmadi'}\n🔗 Bog'langan mahsulotlar: {D.dx_count()}\n⏳ Jarayondagi buyurtmalar: {pr}\n\n/dxcats · /dxfind matn · /dxauto o'yin_id · /dxset item region id · /dxpause · /dxresume", parse_mode="HTML")
+
+@dp.message(Command("dxpause"))
+async def dx_pause(m: Message):
+    if m.from_user.id == C.ADMIN_ID: DXSTATE["on"] = False; await m.answer("⏸ Avto to'xtatildi: hamma buyurtma qo'lda keladi. /dxresume bilan yoqing.")
+@dp.message(Command("dxresume"))
+async def dx_resume(m: Message):
+    if m.from_user.id == C.ADMIN_ID: DXSTATE["on"] = True; await m.answer("▶ Avto yoqildi.")
+
+@dp.message(Command("dxcats"))
+async def dx_cats(m: Message):
+    if m.from_user.id != C.ADMIN_ID or not DX.enabled(): return
+    cats = await DX.categories()
+    if not cats: return await m.answer("Kategoriyalar olinmadi.")
+    await say_chunks(m, [f"<code>{H.escape(str(c.get('category_id') or c.get('id')))}</code> — {H.escape(str(c.get('name') or c.get('title') or ''))}" for c in cats[:80]])
+
+@dp.message(Command("dxfind"))
+async def dx_find(m: Message, command: CommandObject):
+    if m.from_user.id != C.ADMIN_ID or not DX.enabled(): return
+    q = (command.args or "").strip()
+    if not q: return await m.answer("Ishlatish: /dxfind ff")
+    items = await DX.products(q=q, pages=1, limit=60)
+    if not items: return await m.answer("Hech narsa topilmadi.")
+    await say_chunks(m, [pline(p) for p in items])
+
+@dp.message(Command("dxset"))
+async def dx_set_cmd(m: Message, command: CommandObject):
+    if m.from_user.id != C.ADMIN_ID or not DX.enabled(): return
+    a = (command.args or "").split()
+    if len(a) != 3: return await m.answer("Ishlatish: /dxset item_id REGION product_id\nRegion yo'q bo'lsa - yozing. Misol: /dxset ff0 GLOBAL topup-3f9a1c2b7d")
+    item_id, rg, sku = a[0], ("" if a[1] == "-" else a[1].upper()), a[2]
+    if not any(it["id"] == item_id for g in C.CATALOG["games"] for items in g["tabs"].values() for it in items):
+        return await m.answer("❌ Bunday item_id yo'q (catalog.json dagi id, masalan ff0, pu1).")
+    p = await DX.product(sku, fresh=True)
+    if not p: return await m.answer("❌ Donatix'da bunday product_id topilmadi.")
+    D.dx_set(item_id, rg, sku)
+    await m.answer(f"✅ {item_id} [{rg or '—'}] → {H.escape(str(p.get('name') or p.get('title')))} (${p.get('price_usd')})", parse_mode="HTML")
+
+@dp.message(Command("dxauto"))
+async def dx_auto(m: Message, command: CommandObject):
+    if m.from_user.id != C.ADMIN_ID or not DX.enabled(): return
+    a = (command.args or "").split()
+    g = next((x for x in C.CATALOG["games"] if a and x["id"] == a[0]), None)
+    if not g: return await m.answer("Ishlatish: /dxauto o'yin_id [kategoriya_id]\nO'yinlar: " + ", ".join(x["id"] for x in C.CATALOG["games"]))
+    cat = a[1] if len(a) > 1 else C.DX_CATEGORIES.get(g["id"])
+    prods = await DX.products(category=cat)
+    if not prods: return await m.answer("Mahsulot topilmadi. /dxcats bilan kategoriya idsini tekshiring.")
+    def qty(p):
+        mm = re.search(r"\d+", str(p.get("name") or p.get("title") or "")); return int(mm.group()) if mm else None
+    idx = {}
+    for p in prods: idx.setdefault((str(p.get("region") or "").upper(), qty(p)), p)
+    ok = 0; miss = []
+    for items in g["tabs"].values():
+        for it in items:
+            mm = re.match(r"\s*(\d+)", it["name"])
+            if not mm: miss.append(f"{it['id']} ({it['name']})"); continue
+            n = int(mm.group(1))
+            for rg in (g.get("regions") or [""]):
+                p = idx.get((rg.upper(), n)) or (next((v for (r_, q_), v in idx.items() if q_ == n), None) if rg == "" else None)
+                if p and p.get("product_id"): D.dx_set(it["id"], rg, p["product_id"]); ok += 1
+                else: miss.append(f"{it['id']} {rg}".strip())
+    await m.answer(f"✅ Bog'landi: {ok}\n❌ Topilmadi: {len(miss)}\n" + ", ".join(miss[:50]) + "\n\nTopilmaganlarni /dxfind va /dxset bilan qo'lda bog'lang. Narxlarni /dxfind da tekshiring!")
 
 async def on_error(event):
     logging.exception("bot error: %s", getattr(event, "exception", event)); return True
@@ -338,16 +423,152 @@ async def lang(r):
     l = (await r.json()).get("lang")
     if l in ("ru", "uz", "tg", "en"): D.q("UPDATE users SET lang=?, lang_set=1 WHERE id=?", (l, r["u"]["id"]))
     return web.json_response({"ok": True})
+CHK = {}; chk_hits = {}
+def _jpath(d, p):
+    for k in p.split("."):
+        d = d[int(k)] if isinstance(d, list) else d.get(k)
+        if d is None: return None
+    return d
+def _fetch(url, headers):
+    req = urllib.request.Request(url, headers={"User-Agent": "diavex-bot", "Accept": "application/json", **headers})
+    with urllib.request.urlopen(req, timeout=6) as r: return r.status, r.read(200_000).decode("utf-8", "replace")
+async def check_id(game, pid, region=""):
+    """('ok', nik) = topildi | ('noid', '') = bunday ID yo'q | ('unv', '') = tekshirib bo'lmadi (API yo'q yoki xato)."""
+    if DX.enabled() and DXSTATE["on"]:
+        gg = next((x for x in C.CATALOG["games"] if x["id"] == game), None)
+        sku = dx_sku_any(gg, region) if gg else None
+        if sku:
+            key = (game, pid, region); now = time.time(); c = CHK.get(key)
+            if c and now - c[0] < 600: return c[1], c[2]
+            res = await DX.account_check(sku, pid)
+            if res[0] != "unv":
+                if len(CHK) > 2000: CHK.clear()
+                CHK[key] = (now, *res)
+            return res
+    if not C.IDCHECK_URL: return "unv", ""
+    key = (game, pid, region); now = time.time(); c = CHK.get(key)
+    if c and now - c[0] < 600: return c[1], c[2]
+    q = urllib.parse.quote
+    url = C.IDCHECK_URL.replace("{game}", q(str(C.IDCHECK_GAMES.get(game, game)))).replace("{id}", q(pid)).replace("{region}", q(region or ""))
+    try:
+        st, body = await asyncio.to_thread(_fetch, url, C.IDCHECK_HEADERS)
+        nick = _jpath(_json.loads(body), C.IDCHECK_NICK)
+        res = ("ok", str(nick)[:40]) if nick else ("unv", "")
+    except urllib.error.HTTPError as e:
+        res = ("noid", "") if e.code == 404 else ("unv", "")
+    except Exception:
+        logging.exception("idcheck failed"); res = ("unv", "")
+    if res[0] != "unv":
+        if len(CHK) > 2000: CHK.clear()
+        CHK[key] = (now, *res)
+    return res
+async def checkid(r):
+    q = r.query; g = next((x for x in C.CATALOG["games"] if x["id"] == q.get("game")), None)
+    pid = str(q.get("id", "")).strip()
+    if not g or not (pid.isdigit() and 5 <= len(pid) <= 14): return web.json_response({"error": "bad"})
+    if _rl(chk_hits, r["u"]["id"], 10): return web.json_response({"error": "rate"}, status=429)
+    region = q.get("region") if g.get("regions") and q.get("region") in g["regions"] else ""
+    st, nick = await check_id(g["id"], pid, region)
+    if st == "noid": return web.json_response({"error": "noid"})
+    return web.json_response({"ok": True, "nick": nick or None})
 def now_s(): return datetime.now(timezone(timedelta(hours=C.TZ_HOURS))).strftime("%d.%m.%Y %H:%M")
 def to_local(ts):
     try: return datetime.strptime(ts, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc).astimezone(timezone(timedelta(hours=C.TZ_HOURS))).strftime("%d.%m.%Y %H:%M")
     except Exception: return str(ts or "—")
-def order_caption(oid, game, product, pid, price, uid, full, un, when):
+def order_caption(oid, game, product, pid, price, uid, full, un, when, nick=""):
     e = H.escape
-    return (f"🛒 <b>Buyurtma #{oid}</b>\n🎮 O'yin: <b>{e(game)}</b>\n📦 Mahsulot: <b>{e(product)}</b>\n🆔 O'yinchi ID: <code>{e(str(pid))}</code>\n💰 Summa: <b>{price:g} somoni</b>\n"
+    return (f"🛒 <b>Buyurtma #{oid}</b>\n🎮 O'yin: <b>{e(game)}</b>\n📦 Mahsulot: <b>{e(product)}</b>\n🆔 O'yinchi ID: <code>{e(str(pid))}</code>\n🎭 Nik: {("<b>" + e(nick) + "</b>") if nick else "⚠ tasdiqlanmagan"}\n💰 Summa: <b>{price:g} somoni</b>\n"
             f"👤 Ism: {e(full)}\n🔗 Username: {e(un)}\n🆔 Telegram ID: <code>{uid}</code>\n🕒 Vaqt: {when}")
 def order_kb(oid):
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✅ Bajarildi", callback_data=f"od{oid}"), InlineKeyboardButton(text="❌ Rad etish", callback_data=f"or{oid}")]])
+DXSTATE = {"on": True}; DX_RETRY = (5, 15); TASKS = set(); DX_WARNED = set()
+TEMP_CODES = {"rate_limited", "not_available", "temporarily_unavailable", "supplier_unavailable"}
+def dx_resolve(item_id, region):
+    """Mahsulot Donatix'ga bog'langan va avto yoqilgan bo'lsa product_id, aks holda None (qo'lda)."""
+    if not (DX.enabled() and DXSTATE["on"]): return None
+    return D.dx_get(item_id, region or "") or D.dx_get(item_id, "")
+def dx_sku_any(g, region):
+    for items in g["tabs"].values():
+        for it in items:
+            s = D.dx_get(it["id"], region or "") or D.dx_get(it["id"], "")
+            if s: return s
+    return None
+async def admin_say(text, kb=None):
+    try: await bot.send_message(C.ADMIN_ID, text, parse_mode="HTML", reply_markup=kb)
+    except Exception: logging.exception("admin_say failed")
+def order_row_caption(oid):
+    o = D.q("SELECT o.*, u.name uname FROM orders o JOIN users u ON u.id=o.uid WHERE o.id=?", (oid,)).fetchone()
+    if not o: return None, None
+    prod = (o["title"] or "")[len(o["game"] or ""):].strip() or (o["item"] or "")
+    return o, order_caption(o["id"], o["game"] or "", prod, o["pid"], o["price"], o["uid"], o["uname"] or "—", "—", to_local(o["ts"]), o["nick"] or "")
+async def dx_manual(oid, reason):
+    """Avto bo'lmadi: buyurtma 'pending' qoladi, admin qo'lda bajaradi yoki rad etadi."""
+    o, cap = order_row_caption(oid)
+    if o and o["status"] == "pending":
+        await admin_say(cap + f"\n\n⚠ <b>Avto yuborilmadi:</b> {H.escape(str(reason))}\n👉 Qo'lda bajaring yoki rad eting.", order_kb(oid))
+async def dx_done(oid):
+    if D.order_finish(oid):
+        o = D.q("SELECT * FROM orders WHERE id=?", (oid,)).fetchone()
+        await notify(o["uid"], "done", o)
+        await admin_say(f"✅ Buyurtma #{oid} Donatix orqali avto bajarildi.")
+async def dx_fail(oid, why):
+    o = D.cancel_order(oid)   # pul mijozga qaytadi
+    if o:
+        await tell(o["uid"], "ordrej", no=oid, amt=f"{o['price']:.2f}")
+        await admin_say(f"❌ Buyurtma #{oid} bajarilmadi: {H.escape(str(why))}\n💰 Pul mijozga qaytarildi.")
+async def dx_place(oid, item, sku, pid):
+    try:
+        prod = await DX.product(sku)
+        if not prod: return await dx_manual(oid, "Donatix mahsuloti topilmadi")
+        extra = [str(f.get("key")) for f in (prod.get("fields") or []) if f.get("key") != "player_id"]
+        if extra: return await dx_manual(oid, "qo'shimcha maydon kerak: " + ", ".join(extra))
+        if C.USD_TJS:
+            try: cost = float(prod.get("price_usd")) * C.USD_TJS
+            except Exception: cost = None
+            if cost is not None and cost > item["price"]:
+                return await dx_manual(oid, f"tannarx {cost:.2f} somoni sotuv narxidan ({item['price']:g}) yuqori")
+        key = f"diavex-{oid}"   # bir xil kalit: qayta urinishda pul ikki marta yechilmaydi
+        for n in range(len(DX_RETRY) + 1):
+            st, d = await DX.create_order(sku, pid, key); code = DX.err_code(d)
+            if st in (200, 201) and d and d.get("ok"):
+                od = d.get("order") or {}
+                if od.get("order_id") and D.dx_attach(oid, str(od["order_id"])):
+                    if od.get("status") == "completed": await dx_done(oid)
+                    elif od.get("status") == "failed": await dx_fail(oid, od.get("error") or "Donatix: failed")
+                    return
+                return await dx_manual(oid, "Donatix javobi tushunarsiz, panelni tekshiring")
+            if st == 400 and code in ("player_not_found", "account_not_found"):
+                return await dx_fail(oid, "bunday o'yinchi ID topilmadi")
+            if not (st in (0, 429, 503) or code in TEMP_CODES):
+                return await dx_manual(oid, f"{st} {code or (d or {}).get('error', '')}"[:200])
+            if n < len(DX_RETRY): await asyncio.sleep(DX_RETRY[n])
+        await dx_manual(oid, "Donatix javob bermadi. Buyurtma u yerda yaratilgan bo'lishi mumkin, avval Donatix panelida tekshiring (donat ikki marta yuborilmasin)")
+    except Exception:
+        logging.exception("dx_place failed"); await dx_manual(oid, "ichki xato (Render Logs'ni tekshiring)")
+async def dx_poll_once():
+    rows = D.q("SELECT id, dx_id, ts FROM orders WHERE status='processing' AND dx_id!='' ORDER BY id LIMIT 40").fetchall()
+    for o in rows:
+        st, d = await DX.order_status(o["dx_id"])
+        if st == 200 and d and d.get("ok"):
+            od = d.get("order") or {}; s = od.get("status")
+            if s == "completed": await dx_done(o["id"]); continue
+            if s == "failed": await dx_fail(o["id"], od.get("error") or "Donatix: failed"); continue
+        try: age = (datetime.now(timezone.utc) - datetime.strptime(o["ts"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)).total_seconds()
+        except Exception: age = 0
+        if age > 1800 and o["id"] not in DX_WARNED:
+            DX_WARNED.add(o["id"]); await admin_say(f"⏰ Buyurtma #{o['id']} 30 daqiqadan beri Donatix'da bajarilmayapti (<code>{H.escape(str(o['dx_id']))}</code>). Panelda tekshiring.")
+async def dx_worker():
+    last_bal = 0; warned = 0
+    while True:
+        try:
+            if DX.enabled():
+                await dx_poll_once()
+                if time.time() - last_bal > 600:
+                    last_bal = time.time(); b = await DX.balance()
+                    if b is not None and b < C.DX_MIN_BALANCE and time.time() - warned > 6 * 3600:
+                        warned = time.time(); await admin_say(f"⚠ Donatix balansi kam: ${b:.2f}. To'ldiring, aks holda buyurtmalar qo'lda keladi.")
+        except Exception: logging.exception("dx_worker")
+        await asyncio.sleep(8)
 async def order(r):
     d = await r.json(); uid = r["u"]["id"]; tg = r["tg"]
     g, i = C.find_item(d.get("game"), d.get("item"))
@@ -356,17 +577,25 @@ async def order(r):
     region = ""
     if g.get("regions"): region = d.get("region") if d.get("region") in g["regions"] else g["regions"][0]
     product = i["name"] + (f" [{region}]" if region else "")
+    st, nick = await check_id(g["id"], pid, region)   # ID ni server o'zi tekshiradi
+    if st == "noid": return web.json_response({"error": "noid"})
+    sku = dx_resolve(i["id"], region)   # Donatix'ga bog'langan bo'lsa avto
     oid = D.buy(uid, f"{g['name']} {product}", pid, i["price"], g["name"], i["name"])  # narx serverdan olinadi
     if oid == -1: return web.json_response({"error": "pending"})
     if not oid: return web.json_response({"error": "funds"})
+    if nick: D.q("UPDATE orders SET nick=? WHERE id=?", (nick, oid))
     full = f"{tg.get('first_name', '')} {tg.get('last_name', '')}".strip() or "—"
     un = f"@{tg['username']}" if tg.get("username") else "—"
     try:
-        await bot.send_message(C.ADMIN_ID, order_caption(oid, g["name"], product, pid, i["price"], uid, full, un, now_s()), parse_mode="HTML", reply_markup=order_kb(oid))
+        cap = order_caption(oid, g["name"], product, pid, i["price"], uid, full, un, now_s(), nick)
+        if sku: await bot.send_message(C.ADMIN_ID, cap + "\n\n🤖 <i>Donatix orqali avto yuborilmoqda...</i>", parse_mode="HTML")
+        else: await bot.send_message(C.ADMIN_ID, cap, parse_mode="HTML", reply_markup=order_kb(oid))
     except Exception:
         logging.exception("order: admin send failed"); D.cancel_order(oid)   # pul qaytariladi
         return web.json_response({"error": "send"})
     await notify(uid, "acc", D.q("SELECT * FROM orders WHERE id=?", (oid,)).fetchone())
+    if sku:
+        t = asyncio.create_task(dx_place(oid, i, sku, pid)); TASKS.add(t); t.add_done_callback(TASKS.discard)
     return web.json_response({"ok": True, "balance": round(D.user(uid)["balance"], 2)})
 async def topup(r):
     d = await r.json()
@@ -430,7 +659,7 @@ async def main():
     app = web.Application(middlewares=[mw], client_max_size=8 * 1024 * 1024)
     app.on_response_prepare.append(_sec)
     app.add_routes([web.get("/api/catalog", catalog), web.get("/api/me", me), web.post("/api/lang", lang), web.post("/api/order", order),
-                    web.post("/api/topup", topup), web.post("/api/receipt", receipt_api), web.get("/api/history", history), web.get("/api/top", top_api), web.get("/api/reviews", reviews), web.route("OPTIONS", "/{p:.*}", lambda r: web.Response()),
+                    web.post("/api/topup", topup), web.post("/api/receipt", receipt_api), web.get("/api/history", history), web.get("/api/top", top_api), web.get("/api/checkid", checkid), web.get("/api/reviews", reviews), web.route("OPTIONS", "/{p:.*}", lambda r: web.Response()),
                     web.get("/", lambda r: web.FileResponse(os.path.join(HERE, "index.html")))])
     for f in ("style.css", "app.js", "i18n.js", "ru.json", "uz.json", "tg.json", "en.json", "logo.png", "splash.jpg"):
         app.router.add_get("/" + f, lambda r, f=f: web.FileResponse(os.path.join(HERE, f)))
@@ -439,6 +668,7 @@ async def main():
     for x in C.PAY:
         app.router.add_get("/" + x["id"] + ".png", _img(os.path.join(HERE, x["id"] + ".png")))
     run = web.AppRunner(app); await run.setup(); await web.TCPSite(run, "0.0.0.0", C.PORT).start()
+    _t = asyncio.create_task(dx_worker()); TASKS.add(_t)
     await dp.start_polling(bot)
 if __name__ == "__main__":
     asyncio.run(main())

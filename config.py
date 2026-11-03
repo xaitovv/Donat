@@ -37,3 +37,20 @@ CHANNEL_URL = _url(os.getenv("CHANNEL_URL", ""))   # yangiliklar kanali (https:/
 LESSONS_URL = _url(os.getenv("LESSONS_URL", ""))   # darslar havolasi
 
 TZ_HOURS = float(os.getenv("TZ_HOURS", "5"))  # admin xabarlaridagi vaqt (UTC+5)
+
+# --- O'yinchi ID ni tekshirish (yetkazib beruvchi API'si, ixtiyoriy) ---
+# IDCHECK_URL misol: https://api.provider.com/check?game={game}&uid={id}&region={region}&key=SIZNING_KALIT
+IDCHECK_URL = os.getenv("IDCHECK_URL", "").strip()
+def _jenv(name):
+    try: return json.loads(os.getenv(name, "") or "{}")
+    except Exception: return {}
+IDCHECK_GAMES = _jenv("IDCHECK_GAMES")      # {"freefire":"ff","pubg":"pubgm"} (bizning o'yin id -> ularning kodi)
+IDCHECK_HEADERS = _jenv("IDCHECK_HEADERS")  # {"Authorization":"Bearer ..."} kerak bo'lsa
+IDCHECK_NICK = os.getenv("IDCHECK_NICK", "nickname")  # javobdagi nik joyi, masalan data.nickname
+
+# --- Donatix (avto yetkazib berish) ---
+DONATIX_KEY = os.getenv("DONATIX_KEY", "").strip()          # faqat Render Environment'da!
+DONATIX_URL = os.getenv("DONATIX_URL", "https://donatix.tj/api/v1").rstrip("/")
+USD_TJS = float(os.getenv("USD_TJS", "0") or 0)             # 1 USD = ? somoni (tannarx tekshiruvi uchun, ixtiyoriy)
+DX_MIN_BALANCE = float(os.getenv("DX_MIN_BALANCE", "5") or 5)  # Donatix balansi shundan kam bo'lsa ogohlantiradi (USD)
+DX_CATEGORIES = {"freefire": "free_fire", "pubg": "pubg_mobile", "mlbb": "mobile_legends", **_jenv("DX_CATEGORIES")}

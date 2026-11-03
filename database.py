@@ -10,9 +10,10 @@ CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY,name TEXT,lang TEXT DEFA
 CREATE TABLE IF NOT EXISTS orders(id INTEGER PRIMARY KEY AUTOINCREMENT,uid INTEGER,title TEXT,pid TEXT,price REAL,status TEXT DEFAULT 'pending',ts DATETIME DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS topups(id INTEGER PRIMARY KEY AUTOINCREMENT,uid INTEGER,amount REAL,status TEXT DEFAULT 'pending',ts DATETIME DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS ratings(oid INTEGER PRIMARY KEY,uid INTEGER,stars INTEGER);
+CREATE TABLE IF NOT EXISTS dxmap(item_id TEXT,region TEXT,product_id TEXT,PRIMARY KEY(item_id,region));
 CREATE TABLE IF NOT EXISTS fin(id INTEGER PRIMARY KEY AUTOINCREMENT,uid INTEGER,title TEXT,amount REAL,ts DATETIME DEFAULT CURRENT_TIMESTAMP);
 """)
-for _c in ("game", "item"):
+for _c in ("game", "item", "nick", "dx_id"):
     try: db.execute(f"ALTER TABLE orders ADD COLUMN {_c} TEXT DEFAULT ''")
     except sqlite3.OperationalError: pass
 try: db.execute("ALTER TABLE users ADD COLUMN lang_set INTEGER DEFAULT 0")
@@ -36,7 +37,7 @@ def user(uid, name="", inviter=None):
 def _pending(uid):
     """Mijozda tasdiqlanmagan so'rov (buyurtma yoki to'lov) bormi. Eski to'lovlar 12 soatdan keyin o'zi yopiladi."""
     db.execute("UPDATE topups SET status='expired' WHERE status='pending' AND ts < datetime('now','-12 hours')")
-    return db.execute("SELECT (SELECT COUNT(*) FROM orders WHERE uid=? AND status='pending')+(SELECT COUNT(*) FROM topups WHERE uid=? AND status='pending')", (uid, uid)).fetchone()[0] > 0
+    return db.execute("SELECT (SELECT COUNT(*) FROM orders WHERE uid=? AND status IN ('pending','processing'))+(SELECT COUNT(*) FROM topups WHERE uid=? AND status='pending')", (uid, uid)).fetchone()[0] > 0
 def has_pending(uid):
     with _l: return _pending(uid)
 def buy(uid, title, pid, price, game="", item=""):
@@ -63,7 +64,7 @@ def cancel_order(oid):
     """Buyurtmani rad etadi va pulni mijozga qaytaradi (faqat 'pending' bo'lsa, ikki marta qaytarilmaydi)."""
     with _l:
         db.execute("BEGIN IMMEDIATE")
-        o = db.execute("SELECT * FROM orders WHERE id=? AND status='pending'", (oid,)).fetchone()
+        o = db.execute("SELECT * FROM orders WHERE id=? AND status IN ('pending','processing')", (oid,)).fetchone()
         if not o:
             db.execute("ROLLBACK"); return None
         db.execute("UPDATE orders SET status='cancelled' WHERE id=?", (oid,))
@@ -87,3 +88,16 @@ def approve_topup(tid, pct):
             db.execute("INSERT INTO fin(uid,title,amount) VALUES(?,?,?)", (u["invited_by"], "Referral bonus", b))
         db.execute("UPDATE users SET paid=1 WHERE id=?", (t["uid"],))
         db.execute("COMMIT"); return t
+
+def dx_get(item_id, region):
+    r = q("SELECT product_id FROM dxmap WHERE item_id=? AND region=?", (item_id, region or "")).fetchone()
+    return r["product_id"] if r else None
+def dx_set(item_id, region, product_id):
+    q("INSERT OR REPLACE INTO dxmap(item_id,region,product_id) VALUES(?,?,?)", (item_id, region or "", product_id))
+def dx_count():
+    return q("SELECT COUNT(*) c FROM dxmap").fetchone()["c"]
+def dx_attach(oid, dx_id):
+    return q("UPDATE orders SET status='processing', dx_id=? WHERE id=? AND status='pending'", (dx_id, oid)).rowcount
+def order_finish(oid):
+    """'pending' yoki 'processing' bo'lsa 'done' qiladi; ikki marta bajarilmaydi."""
+    return q("UPDATE orders SET status='done' WHERE id=? AND status IN ('pending','processing')", (oid,)).rowcount
