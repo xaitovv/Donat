@@ -11,9 +11,11 @@ CREATE TABLE IF NOT EXISTS orders(id INTEGER PRIMARY KEY AUTOINCREMENT,uid INTEG
 CREATE TABLE IF NOT EXISTS topups(id INTEGER PRIMARY KEY AUTOINCREMENT,uid INTEGER,amount REAL,status TEXT DEFAULT 'pending',ts DATETIME DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS ratings(oid INTEGER PRIMARY KEY,uid INTEGER,stars INTEGER);
 CREATE TABLE IF NOT EXISTS dxmap(item_id TEXT,region TEXT,product_id TEXT,PRIMARY KEY(item_id,region));
+CREATE TABLE IF NOT EXISTS dxcat(product_id TEXT PRIMARY KEY,game_id TEXT,region TEXT,region_title TEXT,name TEXT,tab TEXT,emoji TEXT,price_usd REAL,fields TEXT,kind TEXT,sort INTEGER,qmin INTEGER,qmax INTEGER,active INTEGER DEFAULT 1);
+CREATE TABLE IF NOT EXISTS dxgames(game_id TEXT PRIMARY KEY,cat TEXT,q TEXT);
 CREATE TABLE IF NOT EXISTS fin(id INTEGER PRIMARY KEY AUTOINCREMENT,uid INTEGER,title TEXT,amount REAL,ts DATETIME DEFAULT CURRENT_TIMESTAMP);
 """)
-for _c in ("game", "item", "nick", "dx_id"):
+for _c in ("game", "item", "nick", "dx_id", "dx_fields"):
     try: db.execute(f"ALTER TABLE orders ADD COLUMN {_c} TEXT DEFAULT ''")
     except sqlite3.OperationalError: pass
 try: db.execute("ALTER TABLE users ADD COLUMN lang_set INTEGER DEFAULT 0")
@@ -24,6 +26,8 @@ for _c, _t in (("text", "TEXT DEFAULT ''"), ("reply", "TEXT DEFAULT ''"), ("ts",
 try: db.execute("ALTER TABLE topups ADD COLUMN method TEXT DEFAULT ''")
 except sqlite3.OperationalError: pass
 db.execute("UPDATE topups SET status='expired' WHERE status='pending' AND (method IS NULL OR method='')")
+try: db.execute("ALTER TABLE orders ADD COLUMN qty INTEGER DEFAULT 1")
+except sqlite3.OperationalError: pass
 def q(sql, a=()):
     with _l: return db.execute(sql, a)
 def user(uid, name="", inviter=None):
@@ -40,7 +44,7 @@ def _pending(uid):
     return db.execute("SELECT (SELECT COUNT(*) FROM orders WHERE uid=? AND status IN ('pending','processing'))+(SELECT COUNT(*) FROM topups WHERE uid=? AND status='pending')", (uid, uid)).fetchone()[0] > 0
 def has_pending(uid):
     with _l: return _pending(uid)
-def buy(uid, title, pid, price, game="", item=""):
+def buy(uid, title, pid, price, game="", item="", fields="", qty=1):
     """Atomik: -1 = tasdiqlanmagan so'rov bor, None = mablag' yetarli emas, aks holda buyurtma raqami."""
     with _l:
         db.execute("BEGIN IMMEDIATE")
@@ -49,7 +53,7 @@ def buy(uid, title, pid, price, game="", item=""):
         r = db.execute("UPDATE users SET balance=balance-?,spent=spent+? WHERE id=? AND balance>=?", (price, price, uid, price))
         if r.rowcount == 0:
             db.execute("ROLLBACK"); return None
-        oid = db.execute("INSERT INTO orders(uid,title,pid,price,game,item) VALUES(?,?,?,?,?,?)", (uid, title, pid, price, game, item)).lastrowid
+        oid = db.execute("INSERT INTO orders(uid,title,pid,price,game,item,dx_fields,qty) VALUES(?,?,?,?,?,?,?,?)", (uid, title, pid, price, game, item, fields, qty)).lastrowid
         db.execute("INSERT INTO fin(uid,title,amount) VALUES(?,?,?)", (uid, title, -price))
         db.execute("COMMIT"); return oid
 def add_topup(uid, amount, method):
@@ -101,3 +105,24 @@ def dx_attach(oid, dx_id):
 def order_finish(oid):
     """'pending' yoki 'processing' bo'lsa 'done' qiladi; ikki marta bajarilmaydi."""
     return q("UPDATE orders SET status='done' WHERE id=? AND status IN ('pending','processing')", (oid,)).rowcount
+
+def dxcat_replace(game_id, rows):
+    with _l:
+        db.execute("BEGIN IMMEDIATE")
+        db.execute("UPDATE dxcat SET active=0 WHERE game_id=?", (game_id,))
+        for r in rows:
+            db.execute("INSERT OR REPLACE INTO dxcat(product_id,game_id,region,region_title,name,tab,emoji,price_usd,fields,kind,sort,qmin,qmax,active) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,1)", r)
+        db.execute("COMMIT")
+def dxcat_items(game_id):
+    return q("SELECT * FROM dxcat WHERE game_id=? AND active=1 ORDER BY region, tab, sort, name", (game_id,)).fetchall()
+def dxcat_get(product_id):
+    return q("SELECT * FROM dxcat WHERE product_id=? AND active=1", (product_id,)).fetchone()
+def dxcat_any(game_id, region):
+    return (q("SELECT * FROM dxcat WHERE game_id=? AND region=? AND active=1 LIMIT 1", (game_id, region or "")).fetchone()
+            or q("SELECT * FROM dxcat WHERE game_id=? AND active=1 LIMIT 1", (game_id,)).fetchone())
+def dxcat_game_ids():
+    return [r[0] for r in q("SELECT DISTINCT game_id FROM dxcat WHERE active=1").fetchall()]
+def dxgame_get(game_id):
+    return q("SELECT * FROM dxgames WHERE game_id=?", (game_id,)).fetchone()
+def dxgame_set(game_id, cat, qq):
+    q("INSERT OR REPLACE INTO dxgames(game_id,cat,q) VALUES(?,?,?)", (game_id, cat, qq))

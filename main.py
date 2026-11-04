@@ -1,6 +1,6 @@
 import html as H
 import json as _json, urllib.request, urllib.error, urllib.parse
-import re
+import re, math
 from datetime import datetime, timezone, timedelta
 import logging
 logging.basicConfig(level=logging.INFO)
@@ -21,6 +21,10 @@ for _s in ("CREATE TABLE IF NOT EXISTS ratings(oid INTEGER PRIMARY KEY,uid INTEG
            "ALTER TABLE ratings ADD COLUMN text TEXT DEFAULT ''",
            "ALTER TABLE ratings ADD COLUMN reply TEXT DEFAULT ''",
            "ALTER TABLE ratings ADD COLUMN ts TEXT",
+           "ALTER TABLE orders ADD COLUMN dx_fields TEXT DEFAULT ''",
+           "ALTER TABLE orders ADD COLUMN qty INTEGER DEFAULT 1",
+           "CREATE TABLE IF NOT EXISTS dxcat(product_id TEXT PRIMARY KEY,game_id TEXT,region TEXT,region_title TEXT,name TEXT,tab TEXT,emoji TEXT,price_usd REAL,fields TEXT,kind TEXT,sort INTEGER,qmin INTEGER,qmax INTEGER,active INTEGER DEFAULT 1)",
+           "CREATE TABLE IF NOT EXISTS dxgames(game_id TEXT PRIMARY KEY,cat TEXT,q TEXT)",
            "CREATE TABLE IF NOT EXISTS dxmap(item_id TEXT,region TEXT,product_id TEXT,PRIMARY KEY(item_id,region))",
            "ALTER TABLE orders ADD COLUMN dx_id TEXT DEFAULT ''",
            "ALTER TABLE orders ADD COLUMN nick TEXT DEFAULT ''",
@@ -311,7 +315,7 @@ async def dx_cmd(m: Message):
     else:
         bal_txt = f"❌ HTTP {st} {H.escape(DX.err_code(bd))}\n👉 {H.escape(DX.hint(st, DX.err_code(bd)))}"
     pr = D.q("SELECT COUNT(*) c FROM orders WHERE status='processing'").fetchone()["c"]
-    await m.answer(f"🤖 Donatix avto: <b>{'yoqilgan' if DXSTATE['on'] else 'to‘xtatilgan'}</b>\n💰 Balans: {bal_txt}\n🔗 Bog'langan mahsulotlar: {D.dx_count()}\n⏳ Jarayondagi buyurtmalar: {pr}\n\n/dxcats · /dxfind matn · /dxauto o'yin_id · /dxset item region id · /dxpause · /dxresume", parse_mode="HTML")
+    await m.answer(f"🤖 Donatix avto: <b>{'yoqilgan' if DXSTATE['on'] else 'to‘xtatilgan'}</b>\n💰 Balans: {bal_txt}\n🔗 Bog'langan mahsulotlar: {D.dx_count()}\n⏳ Jarayondagi buyurtmalar: {pr}\n\n/dxsync · /dxcats · /dxfind matn · /dxcat o'yin kategoriya · /dxpause · /dxresume", parse_mode="HTML")
 
 @dp.message(Command("dxpause"))
 async def dx_pause(m: Message):
@@ -385,6 +389,35 @@ async def dx_auto(m: Message, command: CommandObject):
         await m.answer("ℹ️ Donatix'dagi paketlar (bizniki bilan o'lchami farq qilishi mumkin):", parse_mode="HTML")
         await say_chunks(m, [pline(p) for p in prods[:30]])
 
+@dp.message(Command("dxsync"))
+async def dx_sync_cmd(m: Message, command: CommandObject):
+    if m.from_user.id != C.ADMIN_ID or not DX.enabled(): return
+    await m.answer("🔄 Donatix'dan olinyapti...")
+    rep = await dx_sync((command.args or "").strip() or None)
+    lines = []
+    for gid, v in rep.items():
+        if isinstance(v, tuple):
+            n, regs, r = v
+            lines.append(f"✅ <b>{H.escape(gid)}</b>: {n} ta" + (f" ({', '.join(regs)})" if regs else "") + f"\n    namuna: {H.escape(str(r[4]))} → ${r[7]} → <b>{dx_price_tjs(r[7])}</b> somoni")
+        else: lines.append(f"❌ <b>{H.escape(gid)}</b>: {H.escape(str(v))}")
+    await say_chunks(m, lines + ["", f"Ustama: +{C.DX_MARKUP * 100:g}% · kurs: {C.USD_TJS:g}", "Topilmaganlar uchun: /dxcats so'z va /dxcat o'yin_id kategoriya"])
+
+@dp.message(Command("dxcat"))
+async def dx_cat_set(m: Message, command: CommandObject):
+    if m.from_user.id != C.ADMIN_ID: return
+    a = (command.args or "").split()
+    if len(a) != 2 or not any(x["id"] == a[0] for x in C.DX_GAMES):
+        return await m.answer("Ishlatish: /dxcat o'yin_id kategoriya_id\nO'yinlar: " + ", ".join(x["id"] for x in C.DX_GAMES))
+    D.dxgame_set(a[0], a[1], a[1]); await m.answer(f"✅ {a[0]} → {a[1]}. Endi /dxsync {a[0]} yozing.")
+
+@dp.message(Command("dxraw"))
+async def dx_raw(m: Message, command: CommandObject):
+    if m.from_user.id != C.ADMIN_ID or not DX.enabled(): return
+    p = (command.args or "").strip().lstrip("/")
+    if not p or ".." in p: return await m.answer("Ishlatish: /dxraw glory/regions")
+    st, d = await DX.call("GET", "/" + p)
+    await m.answer(H.escape(f"HTTP {st}\n" + json.dumps(d, ensure_ascii=False)[:3500]), parse_mode="HTML")
+
 async def on_error(event):
     logging.exception("bot error: %s", getattr(event, "exception", event)); return True
 try: dp.error()(on_error)
@@ -430,7 +463,7 @@ def cors():
 async def _sec(req, resp):
     resp.headers["X-Content-Type-Options"] = "nosniff"; resp.headers["Referrer-Policy"] = "no-referrer"
 
-async def catalog(r): return web.json_response({**C.CATALOG, "bot": (await bot.me()).username, "support": C.SUPPORT, "rate": C.RATE, "pay": [{k: x[k] for k in ("id", "name", "type", "cur", "color", "icon")} for x in C.PAY]})
+async def catalog(r): return web.json_response({**C.CATALOG, "games": dx_catalog(), "bot": (await bot.me()).username, "support": C.SUPPORT, "rate": C.RATE, "pay": [{k: x[k] for k in ("id", "name", "type", "cur", "color", "icon")} for x in C.PAY]})
 async def me(r):
     u = r["u"]; n = D.q("SELECT COUNT(*) c FROM users WHERE invited_by=?", (u["id"],)).fetchone()["c"]
     b = D.q("SELECT COUNT(*) c FROM users WHERE invited_by=? AND paid=1", (u["id"],)).fetchone()["c"]
@@ -479,14 +512,30 @@ async def check_id(game, pid, region=""):
         CHK[key] = (now, *res)
     return res
 async def checkid(r):
-    q = r.query; g = next((x for x in C.CATALOG["games"] if x["id"] == q.get("game")), None)
-    pid = str(q.get("id", "")).strip()
-    if not g or not (pid.isdigit() and 5 <= len(pid) <= 14): return web.json_response({"error": "bad"})
+    q = r.query; gid = q.get("game"); region = str(q.get("region") or "")
+    try: raw = json.loads(q.get("fields") or "null")
+    except Exception: raw = None
+    if raw is None and q.get("id"): raw = {"player_id": q.get("id")}
     if _rl(chk_hits, r["u"]["id"], 10): return web.json_response({"error": "rate"}, status=429)
-    region = q.get("region") if g.get("regions") and q.get("region") in g["regions"] else ""
+    gm = next((x for x in C.DX_GAMES if x["id"] == gid), None)
+    if gm and D.dxcat_items(gid):   # Donatix'dan olingan o'yin
+        row = D.dxcat_any(gid, region)
+        if not row: return web.json_response({"error": "bad"})
+        if gm["kind"].startswith("telegram"): return web.json_response({"ok": True, "nick": None})
+        keys = [f.get("key") for f in json.loads(row["fields"] or "[]") if f.get("key")] or ["player_id"]
+        fields = parse_fields(raw, keys)
+        if not fields: return web.json_response({"error": "bad"})
+        st, nick = await dx_check_fields(gid, row["product_id"], fields)
+        if st == "noid": return web.json_response({"error": "noid"})
+        return web.json_response({"ok": True, "nick": nick or None})
+    g = next((x for x in C.CATALOG["games"] if x["id"] == gid), None)
+    pid = str((raw or {}).get("player_id", "")).strip()
+    if not g or not (pid.isdigit() and 5 <= len(pid) <= 14): return web.json_response({"error": "bad"})
+    region = region if g.get("regions") and region in g["regions"] else ""
     st, nick = await check_id(g["id"], pid, region)
     if st == "noid": return web.json_response({"error": "noid"})
     return web.json_response({"ok": True, "nick": nick or None})
+
 def now_s(): return datetime.now(timezone(timedelta(hours=C.TZ_HOURS))).strftime("%d.%m.%Y %H:%M")
 def to_local(ts):
     try: return datetime.strptime(ts, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc).astimezone(timezone(timedelta(hours=C.TZ_HOURS))).strftime("%d.%m.%Y %H:%M")
@@ -551,20 +600,107 @@ async def dx_fail(oid, why):
     if o:
         await tell(o["uid"], "ordrej", no=oid, amt=f"{o['price']:.2f}")
         await admin_say(f"❌ Buyurtma #{oid} bajarilmadi: {H.escape(str(why))}\n💰 Pul mijozga qaytarildi.")
-async def dx_place(oid, item, sku, pid):
+def dx_price_tjs(usd, qty=1):
+    """Donatix narxi (USD) -> bizning narx (somoni): kurs va ustama (standart +30%) bilan, 0.1 ga yuqoriga yaxlitlanadi."""
+    return max(0.1, math.ceil(float(usd) * qty * C.USD_TJS * (1 + C.DX_MARKUP) * 10 - 1e-9) / 10)
+nz = lambda s: re.sub(r"[^a-z0-9]", "", str(s or "").lower())
+def _qty(name):
+    mm = re.search(r"\d+", str(name or "")); return int(mm.group()) if mm else 0
+def dx_match(p, gm, cat, qq):
+    keys = [k for k in (nz(cat), nz(gm["name"])) if k]
+    return any(nz(p.get("category_id")).startswith(k) for k in keys) or bool(nz(qq) and nz(p.get("category_name")) == nz(qq))
+async def dx_sync(only=None):
+    """Donatix'dan o'yinlar va paketlarni oladi (miqdorlari Donatix'dagidek). {o'yin_id: (soni, regionlar) | xato matni}"""
+    rep = {}
+    if not C.USD_TJS: return {"_": "USD_TJS yozilmagan (Render → Environment)"}
+    for gm in C.DX_GAMES:
+        if only and gm["id"] != only: continue
+        cfg = D.dxgame_get(gm["id"]); cat = (cfg["cat"] if cfg else "") or gm.get("cat", ""); qq = (cfg["q"] if cfg else "") or gm.get("q", "")
+        kind = gm["kind"]; tg = kind.startswith("telegram")
+        try:
+            if tg: prods = await DX.products(kind=kind, pages=1, limit=100)
+            else:
+                prods = await DX.products(category=cat) if cat else []
+                if not prods and qq: prods = [p for p in await DX.products(q=qq) if dx_match(p, gm, cat, qq)]
+            rows = []
+            for p in prods:
+                try: usd = float(p.get("price_usd") or 0)
+                except Exception: usd = 0
+                if not p.get("product_id") or usd <= 0: continue
+                name = str(p.get("name") or p.get("title") or p["product_id"]); emo = p.get("emoji") or ""
+                shown = name if (not emo or emo in name) else f"{name} {emo}"
+                numeric = _qty(name) > 0 and not re.search(r"(?i)week|month|pass|voucher|ваучер|недел|месяц", name)
+                tab = ("⭐" if kind == "telegram_stars" else "💎") if tg else ("💎" if numeric else "📑 Pass")
+                rows.append((p["product_id"], gm["id"], str(p.get("region") or ""), str(p.get("region_title") or p.get("region") or ""), shown, tab, emo, usd,
+                             json.dumps(p.get("fields") or [], ensure_ascii=False), kind, _qty(name), int(p.get("min_quantity") or 0), int(p.get("max_quantity") or 0)))
+            if not rows: rep[gm["id"]] = "Donatix'da mahsulot topilmadi"; continue
+            D.dxcat_replace(gm["id"], rows)
+            rep[gm["id"]] = (len(rows), sorted({r[2] for r in rows if r[2]}), rows[0])
+        except Exception as e:
+            logging.exception("dx_sync"); rep[gm["id"]] = f"xato: {e}"
+    return rep
+def dx_catalog():
+    """Mini App uchun o'yinlar: Donatix'dan sinxronlanganlar (bo'lsa), qolganlari catalog.json dan."""
+    dyn = {}
+    for gm in C.DX_GAMES:
+        rows = D.dxcat_items(gm["id"])
+        if not rows or not C.USD_TJS: continue
+        kind = gm["kind"]; tg = kind.startswith("telegram")
+        try: fl = json.loads(rows[0]["fields"] or "[]")
+        except Exception: fl = []
+        if not fl: fl = [{"key": "telegram_username" if tg else "player_id"}]
+        g = {"id": gm["id"], "name": gm["name"], "sub": gm.get("sub", ""), "icon": gm.get("icon", "🎮"), "color": gm.get("color", "#334"), "kind": kind,
+             "fields": [{"key": f.get("key"), "label": f.get("label") or ""} for f in fl if f.get("key") and re.fullmatch(r"\w+", str(f.get("key")))], "nocheck": tg, "tabs": {}}
+        if kind == "telegram_stars":
+            r = rows[0]; lo, hi = r["qmin"] or 50, r["qmax"] or 10000
+            g["stars"] = {"id": r["product_id"], "unit": r["price_usd"] * C.USD_TJS * (1 + C.DX_MARKUP), "min": lo, "max": hi, "presets": [p for p in (50, 100, 250, 500, 1000, 2500, 5000) if lo <= p <= hi] or [lo]}
+            g["tabs"] = {"⭐": []}
+        else:
+            regs = []
+            for r in rows:
+                if r["region"] and r["region"] not in regs: regs.append(r["region"])
+                g["tabs"].setdefault(r["tab"], []).append({"id": r["product_id"], "name": r["name"], "price": dx_price_tjs(r["price_usd"]), "region": r["region"]})
+            if regs: g["regions"] = regs; g["region_titles"] = {r["region"]: r["region_title"] for r in rows if r["region"]}
+        dyn[gm["id"]] = g
+    return [dyn[x["id"]] for x in C.DX_GAMES if x["id"] in dyn] + [x for x in C.CATALOG["games"] if x["id"] not in dyn]
+def dx_find(gid, iid):
+    gm = next((x for x in C.DX_GAMES if x["id"] == gid), None); r = D.dxcat_get(str(iid or ""))
+    return (gm, r) if gm and r and r["game_id"] == gid and C.USD_TJS else None
+def parse_fields(raw, keys):
+    """Mijoz yuborgan maydonlarni tekshiradi (faqat ruxsat etilgan kalitlar, qisqa matn)."""
+    if not isinstance(raw, dict): return None
+    out = {}
+    for k in keys:
+        v = str(raw.get(k, "")).strip()
+        if k == "telegram_username":
+            v = v.lstrip("@")
+            if not re.fullmatch(r"[A-Za-z0-9_]{5,32}", v): return None
+            v = "@" + v
+        elif not re.fullmatch(r"[#@\w.\-]{1,40}", v): return None
+        out[k] = v
+    return out
+async def dx_check_fields(gid, sku, fields):
+    key = (gid, sku, json.dumps(fields, sort_keys=True)); now = time.time(); c = CHK.get(key)
+    if c and now - c[0] < 600: return c[1], c[2]
+    res = await DX.account_check(sku, fields)
+    if res[0] != "unv":
+        if len(CHK) > 2000: CHK.clear()
+        CHK[key] = (now, *res)
+    return res
+async def dx_place(oid, price, sku, fields, qty=None):
     try:
         prod = await DX.product(sku)
         if not prod: return await dx_manual(oid, "Donatix mahsuloti topilmadi")
-        extra = [str(f.get("key")) for f in (prod.get("fields") or []) if f.get("key") != "player_id"]
-        if extra: return await dx_manual(oid, "qo'shimcha maydon kerak: " + ", ".join(extra))
+        missing = [str(f.get("key")) for f in (prod.get("fields") or []) if f.get("key") not in fields]
+        if missing: return await dx_manual(oid, "qo'shimcha maydon kerak: " + ", ".join(missing))
         if C.USD_TJS:
-            try: cost = float(prod.get("price_usd")) * C.USD_TJS
+            try: cost = float(prod.get("price_usd")) * (qty or 1) * C.USD_TJS
             except Exception: cost = None
-            if cost is not None and cost > item["price"]:
-                return await dx_manual(oid, f"tannarx {cost:.2f} somoni sotuv narxidan ({item['price']:g}) yuqori")
+            if cost is not None and cost > price:
+                return await dx_manual(oid, f"tannarx {cost:.2f} somoni sotuv narxidan ({price:g}) yuqori")
         key = f"diavex-{oid}"   # bir xil kalit: qayta urinishda pul ikki marta yechilmaydi
         for n in range(len(DX_RETRY) + 1):
-            st, d = await DX.create_order(sku, pid, key); code = DX.err_code(d)
+            st, d = await DX.create_order(sku, fields, key, qty); code = DX.err_code(d)
             if st in (200, 201) and d and d.get("ok"):
                 od = d.get("order") or {}
                 if od.get("order_id") and D.dx_attach(oid, str(od["order_id"])):
@@ -593,11 +729,14 @@ async def dx_poll_once():
         if age > 1800 and o["id"] not in DX_WARNED:
             DX_WARNED.add(o["id"]); await admin_say(f"⏰ Buyurtma #{o['id']} 30 daqiqadan beri Donatix'da bajarilmayapti (<code>{H.escape(str(o['dx_id']))}</code>). Panelda tekshiring.")
 async def dx_worker():
-    last_bal = 0; warned = 0
+    last_bal = 0; warned = 0; last_sync = time.time()
     while True:
         try:
             if DX.enabled():
                 await dx_poll_once()
+                if time.time() - last_sync > 1800:   # katalog va narxlar har 30 daqiqada yangilanadi
+                    last_sync = time.time()
+                    for gid in D.dxcat_game_ids(): await dx_sync(gid)
                 if time.time() - last_bal > 600:
                     last_bal = time.time(); b = await DX.balance()
                     if b is not None and b < C.DX_MIN_BALANCE and time.time() - warned > 6 * 3600:
@@ -606,23 +745,45 @@ async def dx_worker():
         await asyncio.sleep(8)
 async def order(r):
     d = await r.json(); uid = r["u"]["id"]; tg = r["tg"]
-    g, i = C.find_item(d.get("game"), d.get("item"))
-    pid = str(d.get("pid", "")).strip()
-    if not i or not (pid.isdigit() and 5 <= len(pid) <= 14): return web.json_response({"error": "bad"})
-    region = ""
-    if g.get("regions"): region = d.get("region") if d.get("region") in g["regions"] else g["regions"][0]
-    product = i["name"] + (f" [{region}]" if region else "")
-    st, nick = await check_id(g["id"], pid, region)   # ID ni server o'zi tekshiradi
-    if st == "noid": return web.json_response({"error": "noid"})
-    sku = dx_resolve(i["id"], region)   # Donatix'ga bog'langan bo'lsa avto
-    oid = D.buy(uid, f"{g['name']} {product}", pid, i["price"], g["name"], i["name"])  # narx serverdan olinadi
+    dyn = dx_find(d.get("game"), d.get("item"))
+    if dyn:   # Donatix'dan olingan mahsulot: narx Donatix narxi + ustama
+        gm, row = dyn; kind = row["kind"]; stars = kind == "telegram_stars"
+        try: fl = [f.get("key") for f in json.loads(row["fields"] or "[]") if f.get("key")]
+        except Exception: fl = []
+        fields = parse_fields(d.get("fields"), fl or ["telegram_username" if kind.startswith("telegram") else "player_id"])
+        if not fields: return web.json_response({"error": "bad"})
+        qty = 1
+        if stars:
+            try: qty = int(d.get("qty"))
+            except Exception: return web.json_response({"error": "bad"})
+            if not (row["qmin"] <= qty <= row["qmax"]): return web.json_response({"error": "bad"})
+        price = dx_price_tjs(row["price_usd"], qty); region = row["region"] or ""
+        gname = gm["name"]; iname = row["name"] + (f" × {qty}" if stars else "")
+        product = iname + (f" [{region}]" if region else ""); pid = " / ".join(fields.values()); nick = ""
+        if not kind.startswith("telegram"):
+            st, nick = await dx_check_fields(gm["id"], row["product_id"], fields)
+            if st == "noid": return web.json_response({"error": "noid"})
+        sku = row["product_id"] if (DX.enabled() and DXSTATE["on"]) else None
+        fj = json.dumps(fields, ensure_ascii=False)
+    else:   # catalog.json dagi (qo'lda) mahsulot
+        g, i = C.find_item(d.get("game"), d.get("item"))
+        pid = str(d.get("pid", "")).strip()
+        if not i or not (pid.isdigit() and 5 <= len(pid) <= 14): return web.json_response({"error": "bad"})
+        region = ""
+        if g.get("regions"): region = d.get("region") if d.get("region") in g["regions"] else g["regions"][0]
+        gname = g["name"]; iname = i["name"]; price = i["price"]; qty = 1; stars = False; fj = ""
+        product = iname + (f" [{region}]" if region else "")
+        st, nick = await check_id(g["id"], pid, region)   # ID ni server o'zi tekshiradi
+        if st == "noid": return web.json_response({"error": "noid"})
+        sku = dx_resolve(i["id"], region); fields = {"player_id": pid}   # Donatix'ga bog'langan bo'lsa avto
+    oid = D.buy(uid, f"{gname} {product}", pid, price, gname, iname, fj, qty)  # narx serverdan olinadi
     if oid == -1: return web.json_response({"error": "pending"})
     if not oid: return web.json_response({"error": "funds"})
     if nick: D.q("UPDATE orders SET nick=? WHERE id=?", (nick, oid))
     full = f"{tg.get('first_name', '')} {tg.get('last_name', '')}".strip() or "—"
     un = f"@{tg['username']}" if tg.get("username") else "—"
     try:
-        cap = order_caption(oid, g["name"], product, pid, i["price"], uid, full, un, now_s(), nick)
+        cap = order_caption(oid, gname, product, pid, price, uid, full, un, now_s(), nick)
         if sku: await bot.send_message(C.ADMIN_ID, cap + "\n\n🤖 <i>Donatix orqali avto yuborilmoqda...</i>", parse_mode="HTML")
         else: await bot.send_message(C.ADMIN_ID, cap, parse_mode="HTML", reply_markup=order_kb(oid))
     except Exception:
@@ -630,8 +791,9 @@ async def order(r):
         return web.json_response({"error": "send"})
     await notify(uid, "acc", D.q("SELECT * FROM orders WHERE id=?", (oid,)).fetchone())
     if sku:
-        t = asyncio.create_task(dx_place(oid, i, sku, pid)); TASKS.add(t); t.add_done_callback(TASKS.discard)
+        t = asyncio.create_task(dx_place(oid, price, sku, fields, qty if stars else None)); TASKS.add(t); t.add_done_callback(TASKS.discard)
     return web.json_response({"ok": True, "balance": round(D.user(uid)["balance"], 2)})
+
 async def topup(r):
     d = await r.json()
     try: a = float(d.get("amount", 0))

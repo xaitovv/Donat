@@ -55,3 +55,15 @@ USD_TJS = float(os.getenv("USD_TJS", "0") or 0)             # 1 USD = ? somoni (
 DX_MIN_BALANCE = float(os.getenv("DX_MIN_BALANCE", "5") or 5)  # Donatix balansi shundan kam bo'lsa ogohlantiradi (USD)
 DX_CATEGORIES = {"freefire": "free_fire", "pubg": "pubg_mobile", "mlbb": "mobile_legends", **_jenv("DX_CATEGORIES")}
 DX_QUERIES = {"freefire": "ff", "pubg": "pubg", "mlbb": "mobile legends", **_jenv("DX_QUERIES")}   # Donatix qidiruv so'zi (o'yin id -> matn)
+
+DX_MARKUP = float(os.getenv("DX_MARKUP", "30") or 30) / 100.0   # Donatix narxiga ustama, % (standart 30)
+_DXG = [
+ {"id": "freefire", "name": "FREE FIRE", "sub": "Diamonds & Pass", "icon": "🔥", "color": "#1d4ed8", "kind": "topup", "cat": "free_fire", "q": "ff"},
+ {"id": "pubg", "name": "PUBG MOBILE", "sub": "UC", "icon": "🪖", "color": "#3b6ea5", "kind": "topup", "cat": "pubg_mobile", "q": "pubg mobile"},
+ {"id": "mlbb", "name": "MOBILE LEGENDS", "sub": "Diamonds", "icon": "⚔️", "color": "#7c3aed", "kind": "topup", "cat": "mobile_legends", "q": "mobile legends"},
+ {"id": "coc", "name": "CLASH OF CLANS", "sub": "Gems", "icon": "🏰", "color": "#b45309", "kind": "topup", "cat": "clash_of_clans", "q": "clash of clans"},
+ {"id": "tgpremium", "name": "TELEGRAM PREMIUM", "sub": "3 · 6 · 12", "icon": "💎", "color": "#2563eb", "kind": "telegram_premium"},
+ {"id": "tgstars", "name": "TELEGRAM STARS", "sub": "Stars", "icon": "⭐", "color": "#f59e0b", "kind": "telegram_stars"},
+]
+try: DX_GAMES = json.loads(os.getenv("DX_GAMES", "") or "null") or _DXG
+except Exception: DX_GAMES = _DXG

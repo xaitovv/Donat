@@ -16,3 +16,8 @@ Render -> Environment:
 - USD_TJS = 1 dollar necha somoni (tannarx tekshiruvi uchun, tavsiya etiladi)
 - DX_MIN_BALANCE = Donatix balansi shundan kam bo'lsa ogohlantirish (dollarda, standart 5)
 Botda (faqat admin): /dx /dxcats /dxfind matn /dxauto o'yin_id /dxset item_id REGION product_id /dxpause /dxresume
+
+## Donatix katalogi (avto)
+Botda (admin): /dxsync - Donatix'dan o'yinlar va paketlarni oladi (Free Fire, PUBG, Mobile Legends, Clash of Clans, Telegram Premium/Stars),
+narxga ustama qo'shadi (DX_MARKUP, standart 30%), kursi USD_TJS. Keyin har 30 daqiqada o'zi yangilanadi.
+Topilmasa: /dxcats so'z, /dxcat o'yin_id kategoriya_id, so'ng /dxsync o'yin_id. Tuzatish: /dxraw yo'l (masalan glory/regions)

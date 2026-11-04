@@ -64,9 +64,10 @@ async def product(pid, fresh=False):
     if p: _CACHE[pid] = (time.time(), p)
     return p
 
-async def account_check(sku, player_id):
-    """('ok', nik) | ('noid', '') | ('unv', '')."""
-    st, d = await call("POST", "/accounts/check", {"product_id": sku, "fields": {"player_id": player_id}})
+async def account_check(sku, fields):
+    """('ok', nik) | ('noid', '') | ('unv', ''). fields: dict yoki oddiy player_id matni."""
+    if not isinstance(fields, dict): fields = {"player_id": str(fields)}
+    st, d = await call("POST", "/accounts/check", {"product_id": sku, "fields": fields})
     if st == 200 and d and d.get("ok"):
         if d.get("supported") is False: return "unv", ""
         if d.get("valid") is True: return "ok", str(d.get("player_name") or "")[:40]
@@ -74,8 +75,11 @@ async def account_check(sku, player_id):
     if st == 400 and err_code(d) in ("player_not_found", "account_not_found"): return "noid", ""
     return "unv", ""
 
-async def create_order(sku, player_id, key):
-    return await call("POST", "/orders", {"product_id": sku, "fields": {"player_id": player_id}}, {"Idempotency-Key": key})
+async def create_order(sku, fields, key, qty=None):
+    if not isinstance(fields, dict): fields = {"player_id": str(fields)}
+    body = {"product_id": sku, "fields": fields}
+    if qty: body["quantity"] = qty
+    return await call("POST", "/orders", body, {"Idempotency-Key": key})
 
 async def order_status(dx_id):
     return await call("GET", f"/orders/{urllib.request.quote(str(dx_id))}")

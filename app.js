@@ -2,7 +2,7 @@ const API=""; // bir xil server
 const T0=Date.now();
 const tg=window.Telegram?.WebApp;tg?.ready();tg?.expand();
 const $=s=>document.querySelector(s);
-const S={u:{balance:0,spent:0,ref:"",refs:0,bonus:0},cat:{games:[],bot:"",support:""},tab:"games",view:"menu",game:null,sel:null,pid:"",region:"GLOBAL",hist:{orders:[],fin:[]},htab:"orders"};
+const S={u:{balance:0,spent:0,ref:"",refs:0,bonus:0},cat:{games:[],bot:"",support:""},tab:"games",view:"menu",game:null,sel:null,pid:"",region:"",hist:{orders:[],fin:[]},htab:"orders"};
 async function api(p,b){try{const r=await fetch(API+p,{method:b?"POST":"GET",headers:{"Content-Type":"application/json","X-Init":tg?.initData||""},body:b?JSON.stringify(b):undefined});return await r.json()}catch(e){return null}}
 const fmt=n=>(+n).toLocaleString("ru",{maximumFractionDigits:2});
 const go=async v=>{S.view=v;if(v=="hist"){const r=await api("/api/history");if(r)S.hist=r}render();scrollTo(0,0)};
@@ -31,23 +31,40 @@ function menu(){const u=S.u,tgu=tg?.initDataUnsafe?.user||{};
   <div class="row3"><div class="glass" onclick="go('topup')">💳<br>${t("topup")}</div><div class="glass" onclick="alert(t('nopromo'))">🎟<br>${t("bonus")}</div><div class="glass" onclick="tg&&tg.openTelegramLink('https://t.me/'+S.cat.support)">💬<br>${t("support")}</div></div></div>
   <div class="card" style="display:flex;align-items:center;gap:14px;padding:16px 18px" onclick="openReviews()"><div class="av" style="background:#3a3320;border-radius:14px;font-size:26px">⭐</div><div style="flex:1"><b style="font-size:24px">${(u.rating&&u.rating.count)?u.rating.avg.toFixed(1):"—"}</b> <span style="color:#facc15">★★★★★</span> <small style="color:var(--mut)">· ${(u.rating&&u.rating.count)||0} ${t("ratings_n")}</small></div><span style="color:var(--mut)">›</span></div>
   <div class="seg"><a class="${S.tab=="games"?"on":""}" onclick="S.tab='games';render()">${t("games")}</a><a class="${S.tab=="gift"?"on":""}" onclick="S.tab='gift';render()">Gift Code</a><a class="${S.tab=="ai"?"on":""}" onclick="S.tab='ai';render()">🤖 AI</a></div>${body}`}
-function openGame(id){S.game=S.cat.games.find(g=>g.id==id);S.sel=null;S.pid="";S.checked=false;S.nick="";S.idmsg="";S.ptab=Object.keys(S.game.tabs)[0];go("game")}
+const gfields=g=>(g.fields&&g.fields.length)?g.fields:[{key:"player_id",label:""}];
+const flabel=f=>f.label||(f.key=="player_id"?t("playerid"):f.key=="telegram_username"?"Telegram @username":f.key);
+const gregs=g=>g.regions||[];
+const qtyOk=g=>!!g.stars&&S.qty>=g.stars.min&&S.qty<=g.stars.max;
+const starsTotal=g=>Math.ceil(g.stars.unit*S.qty*10-1e-9)/10;
+function openGame(id){const g=S.cat.games.find(x=>x.id==id);if(!g)return;S.game=g;S.sel=null;S.fv={};S.checked=false;S.nick="";S.idmsg="";S.nowarn=false;S.checking=false;
+  S.qty=g.stars?(g.stars.presets[0]||g.stars.min):1;S.region=gregs(g)[0]||"";S.ptab=Object.keys(g.tabs)[0]||"";go("game")}
+function pickR(i){S.region=gregs(S.game)[i];S.sel=null;render()}
+function pickT(i){S.ptab=Object.keys(S.game.tabs)[i];S.sel=null;render()}
+function setQty(v,live){S.qty=Math.max(0,Math.floor(+v||0));if(!live)return render();const g=S.game,b=$("#bbtn"),tt=$("#tot");if(tt)tt.textContent=fmt(starsTotal(g))+" "+t("cur");if(b)b.disabled=!(S.checked&&qtyOk(g))}
 function game(){const g=S.game;if(!g)return"";
-  const tabs=Object.keys(g.tabs),items=g.tabs[S.ptab]||[];
-  const regs=g.regions?`<div class="card"><div class="lbl">${t("region")}</div><div class="reg">${g.regions.map(r=>`<a class="${S.region==r?"on":""}" onclick="S.region='${r}';render()">${r}</a>`).join("")}</div></div>`:"";
+  const fs=gfields(g),regs=gregs(g),tabs=Object.keys(g.tabs),items=(g.tabs[S.ptab]||[]).filter(i=>!i.region||!S.region||i.region==S.region),vals=fs.map(f=>S.fv[f.key]||"").join(" / ");
+  const idcard=S.checked?`<div style="display:flex;align-items:center;gap:14px;background:#10302a;border:1px solid #1a5c4a;border-radius:20px;padding:14px 16px"><div style="width:48px;height:48px;border-radius:50%;background:#16463b;color:#22c993;display:grid;place-items:center;flex:none">${I("check",24)}</div><div style="flex:1;min-width:0">${S.nick?`<b class="tr" style="font-size:18px">«${esc(S.nick)}»</b><div class="ok" style="font-size:15px">${esc(vals)}</div>`:S.nowarn?`<b class="tr" style="font-size:18px">${esc(vals)}</b>`:`<b class="tr" style="font-size:18px">ID: ${esc(vals)}</b><div style="color:#f5a623;font-size:14px;margin-top:4px">⚠ ${t("id_unv")}</div>`}</div><a onclick="S.checked=false;S.nick='';render()" style="color:var(--mut);flex:none">${t("change")}</a></div>`
+   :`${fs.map(f=>`<input placeholder="${esc(flabel(f))}" value="${esc(S.fv[f.key]||"")}" oninput="S.fv['${f.key}']=this.value" style="margin-bottom:10px">`).join("")}<button class="btn" ${S.checking?"disabled":""} onclick="chk()">${S.checking?t("checking"):(g.nocheck?t("continue"):t("check"))}</button>${S.idmsg?`<div style="color:var(--bad);margin-top:10px;font-size:14px">${t(S.idmsg=="noid"?"id_bad":"id_fmt")}</div>`:""}`;
+  const rc=regs.length?`<div class="card"><div class="lbl">${t("region")}</div><div class="reg">${regs.map((r,i)=>`<a class="${S.region==r?"on":""}" onclick="pickR(${i})">${esc((g.region_titles&&g.region_titles[r])||r)}</a>`).join("")}</div></div>`:"";
+  const sc=g.stars?`<div class="card"><div class="lbl">${t("qty")}</div><div class="reg chips" style="margin:0 0 12px">${g.stars.presets.map(p=>`<a class="${S.qty==p?"on":""}" onclick="setQty(${p})">${p} ⭐</a>`).join("")}</div><input type="number" inputmode="numeric" min="${g.stars.min}" max="${g.stars.max}" value="${S.qty}" oninput="setQty(this.value,1)"><div style="display:flex;justify-content:space-between;margin-top:14px;font-size:18px"><b>${t("total")}</b><b id="tot">${fmt(starsTotal(g))} ${t("cur")}</b></div><small style="color:var(--mut)">${g.stars.min} – ${g.stars.max}</small></div>`:"";
+  const tb=(!g.stars&&tabs.length>1)?`<div class="seg">${tabs.map((k,i)=>`<a class="${S.ptab==k?"on":""}" onclick="pickT(${i})">${esc(k)}</a>`).join("")}</div>`:"";
+  const grid=g.stars?"":`<div class="lbl">${t("pick")}</div>${tb}<div class="grid3" style="grid-template-columns:1fr 1fr">${items.map(i=>`<div class="pk ${S.sel==i.id?"on":""}" onclick="S.sel='${esc(i.id)}';render()">${i.off?`<em>-${i.off}%</em>`:""}<b>${esc(i.name)}</b><span>${fmt(i.price)} ${t("cur")}</span></div>`).join("")}</div>`;
+  const can=S.checked&&(g.stars?qtyOk(g):!!S.sel);
   return `<div class="card top" style="margin:0 0 14px"><div class="av" style="background:${g.color};border-radius:14px;position:relative">${gi(g)}${g.icon}</div><div><b>${g.name}</b><br><small style="color:var(--mut)">${g.sub}</small></div></div>
-  <div class="card"><div class="lbl">${t("playerid")}</div>${S.checked?`<div style="display:flex;align-items:center;gap:14px;background:#10302a;border:1px solid #1a5c4a;border-radius:20px;padding:14px 16px"><div style="width:48px;height:48px;border-radius:50%;background:#16463b;color:#22c993;display:grid;place-items:center;flex:none">${I("check",24)}</div><div style="flex:1;min-width:0">${S.nick?`<b class="tr" style="font-size:18px">«${esc(S.nick)}»</b><div class="ok" style="font-size:15px">${esc(S.pid)}</div>`:`<b style="font-size:18px">ID: ${esc(S.pid)}</b><div style="color:#f5a623;font-size:14px;margin-top:4px">⚠ ${t("id_unv")}</div>`}</div><a onclick="S.checked=false;S.nick='';render()" style="color:var(--mut);flex:none">${t("change")}</a></div>`:`<div class="flex"><input id="pid" inputmode="numeric" placeholder="${t("enterid")}" value="${esc(S.pid)}"><button class="btn" style="width:auto;padding:0 18px" ${S.checking?"disabled":""} onclick="chk()">${S.checking?t("checking"):t("check")}</button></div>${S.idmsg?`<div style="color:var(--bad);margin-top:10px;font-size:14px">${t(S.idmsg=="noid"?"id_bad":"id_fmt")}</div>`:""}`}</div>
-  ${regs}<div class="lbl">${t("pick")}</div><div class="seg">${tabs.map(k=>`<a class="${S.ptab==k?"on":""}" onclick="S.ptab='${k}';S.sel=null;render()">${k}</a>`).join("")}</div>
-  <div class="grid3" style="grid-template-columns:1fr 1fr">${items.map(i=>`<div class="pk ${S.sel==i.id?"on":""}" onclick="S.sel='${i.id}';render()">${i.off?`<em>-${i.off}%</em>`:""}<b>${i.name}</b><span>${i.price} ${t("cur")}</span></div>`).join("")}</div>
-  <div class="buy"><button class="btn" ${S.sel&&S.checked?"":"disabled"} onclick="buy()">${t("choose")}</button></div>`}
-async function chk(){const v=$("#pid").value.trim();S.idmsg="";if(!/^\d{5,14}$/.test(v)){S.pid=v;S.idmsg="fmt";return render()}
-  S.pid=v;S.checking=true;render();
-  const r=await api(`/api/checkid?game=${S.game.id}&id=${v}&region=${S.region}`);S.checking=false;
+  <div class="card"><div class="lbl">${g.nocheck?"TELEGRAM":t("playerid")}</div>${idcard}</div>${rc}${sc}${grid}
+  <div class="buy"><button class="btn" id="bbtn" ${can?"":"disabled"} onclick="buy()">${t("choose")}</button></div>`}
+async function chk(){const g=S.game,fs=gfields(g);S.idmsg="";
+  for(const f of fs){const v=(S.fv[f.key]||"").trim();S.fv[f.key]=v;const ok=f.key=="telegram_username"?/^@?[A-Za-z0-9_]{5,32}$/.test(v):/^[#@\w.\-]{1,40}$/.test(v);if(!ok){S.idmsg="fmt";return render()}}
+  S.pid=S.fv[fs[0].key];
+  if(g.nocheck){S.nick="";S.nowarn=true;S.checked=true;return render()}
+  S.nowarn=false;S.checking=true;render();
+  const r=await api(`/api/checkid?game=${g.id}&region=${encodeURIComponent(S.region)}&fields=${encodeURIComponent(JSON.stringify(S.fv))}`);S.checking=false;
   if(r&&r.error=="noid"){S.idmsg="noid";return render()}
+  if(r&&r.error=="bad"){S.idmsg="fmt";return render()}
   S.nick=(r&&r.nick)||"";S.checked=true;render()}
 const pendModal=()=>modal(t("pend_title"),t("pend_body"),t("gotit"),()=>go("hist"),'<span style="font-size:68px;line-height:1">⏳</span>',"#f59e0b24");
-async function buy(){const bt=document.querySelector(".buy .btn");if(bt)bt.disabled=true;
-  const r=await api("/api/order",{game:S.game.id,item:S.sel,pid:S.pid,region:S.region});
+async function buy(){const g=S.game,bt=document.querySelector(".buy .btn");if(bt)bt.disabled=true;
+  const r=await api("/api/order",{game:g.id,item:g.stars?g.stars.id:S.sel,fields:S.fv,region:S.region,qty:S.qty,pid:Object.values(S.fv)[0]});
   if(r?.error=="pending"){if(bt)bt.disabled=false;return pendModal()}
   if(r?.error=="noid"){S.checked=false;S.nick="";S.idmsg="noid";return render()}
   if(r?.error=="funds"){alert(t("nofunds"));return go("topup")}
