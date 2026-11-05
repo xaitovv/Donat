@@ -1,5 +1,5 @@
 """Chek rasmini AI orqali tekshirish (ixtiyoriy). Render'da ANTHROPIC_API_KEY kerak."""
-import asyncio, base64, json, logging, re, urllib.request
+import asyncio, base64, json, logging, re, urllib.request, urllib.error
 import config as C
 
 def enabled(): return bool(C.GEMINI_KEY or C.ANTHROPIC_KEY)
@@ -16,13 +16,26 @@ def _post(body):
                                  headers={"x-api-key": C.ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"})
     with urllib.request.urlopen(req, timeout=45) as r: return json.loads(r.read().decode("utf-8", "replace"))
 
-def _post_gemini(raw, media):
+def _gem_call(raw, media, gen, timeout):
     body = {"contents": [{"parts": [{"text": PROMPT}, {"inline_data": {"mime_type": media, "data": base64.b64encode(raw).decode()}}]}],
-            "generationConfig": {"temperature": 0, "responseMimeType": "application/json"}}
+            "generationConfig": gen}
     req = urllib.request.Request(f"https://generativelanguage.googleapis.com/v1beta/models/{C.GEMINI_MODEL}:generateContent",
                                  data=json.dumps(body).encode(), method="POST",
                                  headers={"x-goog-api-key": C.GEMINI_KEY, "content-type": "application/json"})
-    with urllib.request.urlopen(req, timeout=45) as r: return json.loads(r.read().decode("utf-8", "replace"))
+    with urllib.request.urlopen(req, timeout=timeout) as r: return json.loads(r.read().decode("utf-8", "replace"))
+
+def _post_gemini(raw, media):
+    """1-urinish: 'o'ylash' o'chirilgan (tez). 2-urinish: oddiy sozlama (timeout yoki 400 bo'lsa). Xato sababi logga yoziladi."""
+    base = {"temperature": 0, "responseMimeType": "application/json"}
+    last = None
+    for gen in (dict(base, thinkingConfig={"thinkingBudget": 0}), base):
+        try: return _gem_call(raw, media, gen, 30)
+        except urllib.error.HTTPError as e:
+            logging.error("gemini HTTP %s: %s", e.code, e.read().decode("utf-8", "replace")[:400]); last = e
+            if e.code != 400: break   # 400 = sozlama qo'llab-quvvatlanmadi, 2-urinishga o'tamiz; boshqa xato (403/404/429) takrorlanmaydi
+        except Exception as e:
+            logging.error("gemini error: %r", e); last = e
+    raise last
 
 async def analyze(raw, media="image/jpeg"):
     """dict yoki None (xato bo'lsa). Chekni o'qiydi, lekin qaror qabul qilmaydi."""
