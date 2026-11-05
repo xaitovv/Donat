@@ -72,3 +72,5 @@ except Exception: DX_GAMES = _DXG
 ANTHROPIC_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
 AI_MODEL = os.getenv("AI_MODEL", "claude-haiku-5-5").strip()
 AI_URL = os.getenv("AI_URL", "https://api.anthropic.com/v1/messages").strip()
+GEMINI_KEY = os.getenv("GEMINI_KEY", "").strip()   # bepul Gemini kaliti; qo'yilsa AI shu orqali ishlaydi (Claude kaliti o'rniga)
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-latest").strip()

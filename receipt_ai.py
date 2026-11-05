@@ -2,7 +2,7 @@
 import asyncio, base64, json, logging, re, urllib.request
 import config as C
 
-def enabled(): return bool(C.ANTHROPIC_KEY)
+def enabled(): return bool(C.GEMINI_KEY or C.ANTHROPIC_KEY)
 
 PROMPT = ("You verify payment receipt screenshots for a game top-up shop in Tajikistan (banking apps such as DC Next / Dushanbe City, Alif, Korti Milli). "
           "Look ONLY at the image. Reply with ONE JSON object and nothing else:\n"
@@ -16,9 +16,25 @@ def _post(body):
                                  headers={"x-api-key": C.ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"})
     with urllib.request.urlopen(req, timeout=45) as r: return json.loads(r.read().decode("utf-8", "replace"))
 
+def _post_gemini(raw, media):
+    body = {"contents": [{"parts": [{"text": PROMPT}, {"inline_data": {"mime_type": media, "data": base64.b64encode(raw).decode()}}]}],
+            "generationConfig": {"temperature": 0, "responseMimeType": "application/json"}}
+    req = urllib.request.Request(f"https://generativelanguage.googleapis.com/v1beta/models/{C.GEMINI_MODEL}:generateContent",
+                                 data=json.dumps(body).encode(), method="POST",
+                                 headers={"x-goog-api-key": C.GEMINI_KEY, "content-type": "application/json"})
+    with urllib.request.urlopen(req, timeout=45) as r: return json.loads(r.read().decode("utf-8", "replace"))
+
 async def analyze(raw, media="image/jpeg"):
     """dict yoki None (xato bo'lsa). Chekni o'qiydi, lekin qaror qabul qilmaydi."""
     if not enabled(): return None
+    if C.GEMINI_KEY:   # Gemini (bepul) ustuvor; yo'q bo'lsa Claude
+        try:
+            data = await asyncio.to_thread(_post_gemini, raw, media)
+            text = "".join(p.get("text", "") for p in data["candidates"][0]["content"]["parts"])
+            m = re.search(r"\{.*\}", text, re.S)
+            return json.loads(m.group()) if m else None
+        except Exception:
+            logging.exception("receipt ai (gemini) failed"); return None
     body = {"model": C.AI_MODEL, "max_tokens": 500, "messages": [{"role": "user", "content": [
         {"type": "image", "source": {"type": "base64", "media_type": media, "data": base64.b64encode(raw).decode()}},
         {"type": "text", "text": PROMPT}]}]}
