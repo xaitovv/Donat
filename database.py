@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS ratings(oid INTEGER PRIMARY KEY,uid INTEGER,stars INT
 CREATE TABLE IF NOT EXISTS dxmap(item_id TEXT,region TEXT,product_id TEXT,PRIMARY KEY(item_id,region));
 CREATE TABLE IF NOT EXISTS dxcat(product_id TEXT PRIMARY KEY,game_id TEXT,region TEXT,region_title TEXT,name TEXT,tab TEXT,emoji TEXT,price_usd REAL,fields TEXT,kind TEXT,sort INTEGER,qmin INTEGER,qmax INTEGER,active INTEGER DEFAULT 1);
 CREATE TABLE IF NOT EXISTS dxgames(game_id TEXT PRIMARY KEY,cat TEXT,q TEXT);
+CREATE TABLE IF NOT EXISTS rhash(h TEXT PRIMARY KEY,tid INTEGER);
 CREATE TABLE IF NOT EXISTS fin(id INTEGER PRIMARY KEY AUTOINCREMENT,uid INTEGER,title TEXT,amount REAL,ts DATETIME DEFAULT CURRENT_TIMESTAMP);
 """)
 for _c in ("game", "item", "nick", "dx_id", "dx_fields"):
@@ -111,6 +112,8 @@ def dxcat_replace(game_id, rows):
         db.execute("BEGIN IMMEDIATE")
         db.execute("UPDATE dxcat SET active=0 WHERE game_id=?", (game_id,))
         for r in rows:
+            ex = db.execute("SELECT game_id, active FROM dxcat WHERE product_id=?", (r[0],)).fetchone()
+            if ex and ex["active"] and ex["game_id"] != game_id: continue   # mahsulot boshqa o'yinga tegishli: ustidan yozmaymiz
             db.execute("INSERT OR REPLACE INTO dxcat(product_id,game_id,region,region_title,name,tab,emoji,price_usd,fields,kind,sort,qmin,qmax,active) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,1)", r)
         db.execute("COMMIT")
 def dxcat_items(game_id):
@@ -126,3 +129,9 @@ def dxgame_get(game_id):
     return q("SELECT * FROM dxgames WHERE game_id=?", (game_id,)).fetchone()
 def dxgame_set(game_id, cat, qq):
     q("INSERT OR REPLACE INTO dxgames(game_id,cat,q) VALUES(?,?,?)", (game_id, cat, qq))
+
+def rhash_get(h):
+    r = q("SELECT tid FROM rhash WHERE h=?", (h,)).fetchone()
+    return r["tid"] if r else None
+def rhash_add(h, tid):
+    q("INSERT OR IGNORE INTO rhash(h,tid) VALUES(?,?)", (h, tid))

@@ -1,0 +1,31 @@
+"""Chek rasmini AI orqali tekshirish (ixtiyoriy). Render'da ANTHROPIC_API_KEY kerak."""
+import asyncio, base64, json, logging, re, urllib.request
+import config as C
+
+def enabled(): return bool(C.ANTHROPIC_KEY)
+
+PROMPT = ("You verify payment receipt screenshots for a game top-up shop in Tajikistan (banking apps such as DC Next / Dushanbe City, Alif, Korti Milli). "
+          "Look ONLY at the image. Reply with ONE JSON object and nothing else:\n"
+          '{"is_receipt": boolean, "status": "success"|"failed"|"unknown", "amount": number or null, "currency": string or null, '
+          '"date": "YYYY-MM-DD HH:MM" or null, "recipient": string or null, "sender": string or null, '
+          '"tamper_signs": [short strings such as inconsistent fonts or digits, impossible date, edited areas], "note": short string}\n'
+          "Set is_receipt=false if the image is not a bank transfer confirmation (a photo of a book, a random picture, a chat screenshot).")
+
+def _post(body):
+    req = urllib.request.Request(C.AI_URL, data=json.dumps(body).encode(), method="POST",
+                                 headers={"x-api-key": C.ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"})
+    with urllib.request.urlopen(req, timeout=45) as r: return json.loads(r.read().decode("utf-8", "replace"))
+
+async def analyze(raw, media="image/jpeg"):
+    """dict yoki None (xato bo'lsa). Chekni o'qiydi, lekin qaror qabul qilmaydi."""
+    if not enabled(): return None
+    body = {"model": C.AI_MODEL, "max_tokens": 500, "messages": [{"role": "user", "content": [
+        {"type": "image", "source": {"type": "base64", "media_type": media, "data": base64.b64encode(raw).decode()}},
+        {"type": "text", "text": PROMPT}]}]}
+    try:
+        data = await asyncio.to_thread(_post, body)
+        text = "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
+        m = re.search(r"\{.*\}", text, re.S)
+        return json.loads(m.group()) if m else None
+    except Exception:
+        logging.exception("receipt ai failed"); return None

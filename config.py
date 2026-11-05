@@ -56,7 +56,7 @@ DX_MIN_BALANCE = float(os.getenv("DX_MIN_BALANCE", "5") or 5)  # Donatix balansi
 DX_CATEGORIES = {"freefire": "free_fire", "pubg": "pubg_mobile", "mlbb": "mobile_legends", **_jenv("DX_CATEGORIES")}
 DX_QUERIES = {"freefire": "ff", "pubg": "pubg", "mlbb": "mobile legends", **_jenv("DX_QUERIES")}   # Donatix qidiruv so'zi (o'yin id -> matn)
 
-DX_MARKUP = float(os.getenv("DX_MARKUP", "30") or 30) / 100.0   # Donatix narxiga ustama, % (standart 30)
+DX_MARKUP = float(os.getenv("DX_MARKUP", "27") or 27) / 100.0   # Donatix narxiga ustama, % (standart 27)
 _DXG = [
  {"id": "freefire", "name": "FREE FIRE", "sub": "Diamonds & Pass", "icon": "🔥", "color": "#1d4ed8", "kind": "topup", "cat": "free_fire", "q": "ff"},
  {"id": "pubg", "name": "PUBG MOBILE", "sub": "UC", "icon": "🪖", "color": "#3b6ea5", "kind": "topup", "cat": "pubg_mobile", "q": "pubg mobile"},
@@ -67,3 +67,8 @@ _DXG = [
 ]
 try: DX_GAMES = json.loads(os.getenv("DX_GAMES", "") or "null") or _DXG
 except Exception: DX_GAMES = _DXG
+
+# --- Chekni AI bilan tekshirish (ixtiyoriy) ---
+ANTHROPIC_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
+AI_MODEL = os.getenv("AI_MODEL", "claude-haiku-5-5").strip()
+AI_URL = os.getenv("AI_URL", "https://api.anthropic.com/v1/messages").strip()

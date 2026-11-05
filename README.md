@@ -21,3 +21,7 @@ Botda (faqat admin): /dx /dxcats /dxfind matn /dxauto o'yin_id /dxset item_id RE
 Botda (admin): /dxsync - Donatix'dan o'yinlar va paketlarni oladi (Free Fire, PUBG, Mobile Legends, Clash of Clans, Telegram Premium/Stars),
 narxga ustama qo'shadi (DX_MARKUP, standart 30%), kursi USD_TJS. Keyin har 30 daqiqada o'zi yangilanadi.
 Topilmasa: /dxcats so'z, /dxcat o'yin_id kategoriya_id, so'ng /dxsync o'yin_id. Tuzatish: /dxraw yo'l (masalan glory/regions)
+
+## Chekni AI bilan tekshirish (ixtiyoriy)
+Render -> Environment: ANTHROPIC_API_KEY (Claude API kaliti), AI_MODEL (ixtiyoriy). Chek adminga kelgach, tagiga AI natijasi qo'shiladi:
+chek ekanligi, summa, qabul qiluvchi raqam, sana, tahrir belgilari. Qaror baribir adminda. Bir xil chek rasmi ikki marta qabul qilinmaydi.

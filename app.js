@@ -15,8 +15,9 @@ async function init(){
   if(localStorage.getItem("light"))document.body.classList.add("light");
   render();if(new URLSearchParams(location.search).get("go")=="hist")go("hist");setTimeout(()=>$("#splash").classList.add("hide"),Math.max(0,3000-(Date.now()-T0)))}
 function render(){
-  const v=S.view,m={menu,game,topup,meth,hist,friends,set,rev,top:topv,pay:payv},sub=["game","topup","meth","pay","rev"].includes(v);
+  const v=S.view,m={menu,game,topup,meth,hist,friends,set,rev,top:topv,res:resv,pay:payv},sub=["game","topup","meth","pay","rev","res"].includes(v);
   $("#app").innerHTML=m[v]();
+  $("#nav").style.display=v=="res"?"none":"";
   $("#nav").innerHTML=NAV.map(([k,i,n])=>`<a class="${v==k||(k=="menu"&&sub)||(k=="friends"&&v=="top")?"on":""}" onclick="go('${k}')">${I(i)}<span>${t(n)}</span></a>`).join("");
   if(tg)tg.BackButton[(sub||v=="top")?"show":"hide"]()}
 tg?.BackButton.onClick(()=>go(S.view=="top"?"friends":"menu"));
@@ -32,17 +33,18 @@ function menu(){const u=S.u,tgu=tg?.initDataUnsafe?.user||{};
   <div class="card" style="display:flex;align-items:center;gap:14px;padding:16px 18px" onclick="openReviews()"><div class="av" style="background:#3a3320;border-radius:14px;font-size:26px">⭐</div><div style="flex:1"><b style="font-size:24px">${(u.rating&&u.rating.count)?u.rating.avg.toFixed(1):"—"}</b> <span style="color:#facc15">★★★★★</span> <small style="color:var(--mut)">· ${(u.rating&&u.rating.count)||0} ${t("ratings_n")}</small></div><span style="color:var(--mut)">›</span></div>
   <div class="seg"><a class="${S.tab=="games"?"on":""}" onclick="S.tab='games';render()">${t("games")}</a><a class="${S.tab=="gift"?"on":""}" onclick="S.tab='gift';render()">Gift Code</a><a class="${S.tab=="ai"?"on":""}" onclick="S.tab='ai';render()">🤖 AI</a></div>${body}`}
 const gfields=g=>(g.fields&&g.fields.length)?g.fields:[{key:"player_id",label:""}];
-const flabel=f=>f.label||(f.key=="player_id"?t("playerid"):f.key=="telegram_username"?"Telegram @username":f.key);
+const flabel=f=>f.key=="player_id"?t("enterid"):f.key=="telegram_username"?"Telegram @username":(f.label||f.key);
 const gregs=g=>g.regions||[];
 const qtyOk=g=>!!g.stars&&S.qty>=g.stars.min&&S.qty<=g.stars.max;
 const starsTotal=g=>Math.ceil(g.stars.unit*S.qty*10-1e-9)/10;
 function openGame(id){const g=S.cat.games.find(x=>x.id==id);if(!g)return;S.game=g;S.sel=null;S.fv={};S.checked=false;S.nick="";S.idmsg="";S.nowarn=false;S.checking=false;
   S.qty=g.stars?(g.stars.presets[0]||g.stars.min):1;S.region=gregs(g)[0]||"";S.ptab=Object.keys(g.tabs)[0]||"";go("game")}
+const availTabs=g=>Object.keys(g.tabs).filter(k=>g.tabs[k].some(i=>!i.region||!S.region||i.region==S.region));
 function pickR(i){S.region=gregs(S.game)[i];S.sel=null;render()}
-function pickT(i){S.ptab=Object.keys(S.game.tabs)[i];S.sel=null;render()}
+function pickT(i){S.ptab=availTabs(S.game)[i];S.sel=null;render()}
 function setQty(v,live){S.qty=Math.max(0,Math.floor(+v||0));if(!live)return render();const g=S.game,b=$("#bbtn"),tt=$("#tot");if(tt)tt.textContent=fmt(starsTotal(g))+" "+t("cur");if(b)b.disabled=!(S.checked&&qtyOk(g))}
 function game(){const g=S.game;if(!g)return"";
-  const fs=gfields(g),regs=gregs(g),tabs=Object.keys(g.tabs),items=(g.tabs[S.ptab]||[]).filter(i=>!i.region||!S.region||i.region==S.region),vals=fs.map(f=>S.fv[f.key]||"").join(" / ");
+  const fs=gfields(g),regs=gregs(g),tabs=availTabs(g);if(!tabs.includes(S.ptab))S.ptab=tabs[0]||S.ptab;const items=(g.tabs[S.ptab]||[]).filter(i=>!i.region||!S.region||i.region==S.region),vals=fs.map(f=>S.fv[f.key]||"").join(" / ");
   const idcard=S.checked?`<div style="display:flex;align-items:center;gap:14px;background:#10302a;border:1px solid #1a5c4a;border-radius:20px;padding:14px 16px"><div style="width:48px;height:48px;border-radius:50%;background:#16463b;color:#22c993;display:grid;place-items:center;flex:none">${I("check",24)}</div><div style="flex:1;min-width:0">${S.nick?`<b class="tr" style="font-size:18px">«${esc(S.nick)}»</b><div class="ok" style="font-size:15px">${esc(vals)}</div>`:S.nowarn?`<b class="tr" style="font-size:18px">${esc(vals)}</b>`:`<b class="tr" style="font-size:18px">ID: ${esc(vals)}</b><div style="color:#f5a623;font-size:14px;margin-top:4px">⚠ ${t("id_unv")}</div>`}</div><a onclick="S.checked=false;S.nick='';render()" style="color:var(--mut);flex:none">${t("change")}</a></div>`
    :`${fs.map(f=>`<input placeholder="${esc(flabel(f))}" value="${esc(S.fv[f.key]||"")}" oninput="S.fv['${f.key}']=this.value" style="margin-bottom:10px">`).join("")}<button class="btn" ${S.checking?"disabled":""} onclick="chk()">${S.checking?t("checking"):(g.nocheck?t("continue"):t("check"))}</button>${S.idmsg?`<div style="color:var(--bad);margin-top:10px;font-size:14px">${t(S.idmsg=="noid"?"id_bad":"id_fmt")}</div>`:""}`;
   const rc=regs.length?`<div class="card"><div class="lbl">${t("region")}</div><div class="reg">${regs.map((r,i)=>`<a class="${S.region==r?"on":""}" onclick="pickR(${i})">${esc((g.region_titles&&g.region_titles[r])||r)}</a>`).join("")}</div></div>`:"";
@@ -62,13 +64,23 @@ async function chk(){const g=S.game,fs=gfields(g);S.idmsg="";
   if(r&&r.error=="noid"){S.idmsg="noid";return render()}
   if(r&&r.error=="bad"){S.idmsg="fmt";return render()}
   S.nick=(r&&r.nick)||"";S.checked=true;render()}
+const CLK='<svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#14c38e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
+function showRes(o){S.res=o;go("res")}
+function resv(){const o=S.res||{};
+  return `<div class="flex" style="align-items:center;gap:14px;margin:6px 0 4px"><div class="av" style="background:var(--card);border:1px solid var(--line);color:var(--tx);width:48px;height:48px" onclick="go('menu')">${I("back",22)}</div><h1 style="font-size:25px">${o.head||""}</h1></div>
+  <div style="text-align:center;padding:34px 4px 14px"><div class="rg"><div class="rc">${CLK}</div></div><h1 style="font-size:30px;line-height:1.2;margin:28px 0 12px">${o.title||""}</h1><p style="color:var(--mut);font-size:17px;line-height:1.55">${o.body||""}</p></div>
+  ${o.rows?`<div class="card" style="text-align:center;padding:20px">${o.rows}</div>`:""}
+  <button class="btn" style="background:var(--card);border:1px solid var(--line);color:var(--tx);margin-top:8px;padding:18px" onclick="go('menu')">${t("tomenu")}</button>`}
+function fundsModal(need,bal){const o=document.createElement("div");o.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:30;display:flex;align-items:center;justify-content:center;padding:24px";
+  o.innerHTML=`<div style="background:#101022;border:1px solid var(--line);border-radius:26px;padding:26px 22px;width:100%;max-width:340px;text-align:center"><div style="width:68px;height:68px;border-radius:50%;background:#3a1620;color:#ef4444;display:grid;place-items:center;margin:0 auto 14px">${I("wallet",32)}</div><h2 style="font-size:22px;margin-bottom:12px">${t("nofunds_t")}</h2><div style="color:var(--mut)">${t("balance")}: <b style="color:var(--tx)">${fmt(bal)} ${t("cur")}</b></div><div style="color:var(--mut);margin-top:4px">${t("need_l")}: <b style="color:var(--tx)">${fmt(need)} ${t("cur")}</b></div><div class="flex" style="margin-top:20px"><button class="btn" style="background:var(--card2)" id="fc">${t("close")}</button><button class="btn" id="ft">${t("topup")}</button></div></div>`;
+  o.querySelector("#fc").onclick=()=>o.remove();o.querySelector("#ft").onclick=()=>{o.remove();go("topup")};document.body.appendChild(o)}
 const pendModal=()=>modal(t("pend_title"),t("pend_body"),t("gotit"),()=>go("hist"),'<span style="font-size:68px;line-height:1">⏳</span>',"#f59e0b24");
 async function buy(){const g=S.game,bt=document.querySelector(".buy .btn");if(bt)bt.disabled=true;
   const r=await api("/api/order",{game:g.id,item:g.stars?g.stars.id:S.sel,fields:S.fv,region:S.region,qty:S.qty,pid:Object.values(S.fv)[0]});
   if(r?.error=="pending"){if(bt)bt.disabled=false;return pendModal()}
   if(r?.error=="noid"){S.checked=false;S.nick="";S.idmsg="noid";return render()}
-  if(r?.error=="funds"){alert(t("nofunds"));return go("topup")}
-  if(r?.ok){S.u.balance=r.balance;modal(t("ord_title"),t("ord_body"),t("gotit"),()=>go("hist"),'<span style="font-size:68px;line-height:1">⏳</span>',"#f59e0b24")}else{if(bt)bt.disabled=false;alert(t("err"))}}
+  if(r?.error=="funds"){if(bt)bt.disabled=false;return fundsModal(r.need,r.balance)}
+  if(r?.ok){S.u.balance=r.balance;const rows=`<div class="lbl" style="text-align:center">${t("product_l")}</div><b style="font-size:19px">${esc(r.game)} · ${esc(r.item)}</b><div style="color:var(--mut);margin-top:6px">${r.nick?"«"+esc(r.nick)+"» · ":""}${esc(Object.values(S.fv).join(" / "))}</div><div style="color:#8b7bff;font-weight:700;margin-top:6px">${fmt(r.price)} ${t("cur")}</div>`;showRes({head:t("res_wait")+" ⏳",title:t("ord_title"),body:t("ord_body"),rows})}else{if(bt)bt.disabled=false;alert(t("err"))}}
 const CPY='<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#8b7bff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-left:6px"><rect x="9" y="9" width="12" height="12" rx="2.5"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg>';
 const pi=id=>`<img class="gimg" src="/${id}.png?v=6" onerror="this.style.display='none'">`;
 function modal(title,body,btn,cb,icon,bg){const o=document.createElement("div");o.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:30;display:flex;align-items:center;justify-content:center;padding:20px";
@@ -104,7 +116,7 @@ function pickF(el){const f=el.files[0];if(!f)return;if(f.size>5*1024*1024)return
 function toJpeg(f){return new Promise((ok,no)=>{const im=new Image();im.onload=()=>{const k=Math.min(1,1280/Math.max(im.width,im.height)),c=document.createElement("canvas");c.width=im.width*k;c.height=im.height*k;c.getContext("2d").drawImage(im,0,0,c.width,c.height);ok(c.toDataURL("image/jpeg",.8))};im.onerror=no;im.src=URL.createObjectURL(f)})}
 async function sendRc(){const b=document.querySelector(".btn");b.disabled=true;
   try{const img=await toJpeg(S.file);const r=await api("/api/receipt",{amount:S.pay.amount,method:S.pay.method,image:img});
-    if(r?.ok){modal(t("rcpt_title"),t("rcpt_body"),t("gotit"),()=>{S.file=null;S.amt=0;go("menu")},'<span style="font-size:68px;line-height:1">⏳</span>',"#f59e0b24")}else if(r?.error=="pending"){pendModal();b.disabled=false}else{alert(t("err"));b.disabled=false}}catch(e){alert(t("err"));b.disabled=false}}
+    if(r?.ok){const p=S.pay||{};S.file=null;S.amt=0;showRes({head:t("res_wait")+" ⏳",title:t("rcpt_title"),body:t("rcpt_sent").replace("{a}","<b>"+p.amount+" "+t("cur")+"</b>"),rows:`<div class="lbl" style="text-align:center">${t("paymethod_l")}</div><b style="font-size:20px">${esc(p.name||"")}</b><div style="color:#8b7bff;font-weight:700;margin-top:6px">${p.amount} ${t("cur")}</div>`})}else if(r?.error=="pending"){pendModal();b.disabled=false}else if(r?.error=="dup"){alert(t("dup_rcpt"));b.disabled=false}else{alert(t("err"));b.disabled=false}}catch(e){alert(t("err"));b.disabled=false}}
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 async function openReviews(){const r=await api("/api/reviews");if(r&&r.items)S.rv=r;S.rf={s:0,g:"",o:"new"};go("rev")}
 function setRf(k,v){S.rf[k]=v;render()}

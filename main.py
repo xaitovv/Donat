@@ -1,6 +1,7 @@
 import html as H
 import json as _json, urllib.request, urllib.error, urllib.parse
-import re, math
+import re, math, hashlib
+import receipt_ai as AI
 from datetime import datetime, timezone, timedelta
 import logging
 logging.basicConfig(level=logging.INFO)
@@ -25,6 +26,7 @@ for _s in ("CREATE TABLE IF NOT EXISTS ratings(oid INTEGER PRIMARY KEY,uid INTEG
            "ALTER TABLE orders ADD COLUMN qty INTEGER DEFAULT 1",
            "CREATE TABLE IF NOT EXISTS dxcat(product_id TEXT PRIMARY KEY,game_id TEXT,region TEXT,region_title TEXT,name TEXT,tab TEXT,emoji TEXT,price_usd REAL,fields TEXT,kind TEXT,sort INTEGER,qmin INTEGER,qmax INTEGER,active INTEGER DEFAULT 1)",
            "CREATE TABLE IF NOT EXISTS dxgames(game_id TEXT PRIMARY KEY,cat TEXT,q TEXT)",
+           "CREATE TABLE IF NOT EXISTS rhash(h TEXT PRIMARY KEY,tid INTEGER)",
            "CREATE TABLE IF NOT EXISTS dxmap(item_id TEXT,region TEXT,product_id TEXT,PRIMARY KEY(item_id,region))",
            "ALTER TABLE orders ADD COLUMN dx_id TEXT DEFAULT ''",
            "ALTER TABLE orders ADD COLUMN nick TEXT DEFAULT ''",
@@ -397,8 +399,8 @@ async def dx_sync_cmd(m: Message, command: CommandObject):
     lines = []
     for gid, v in rep.items():
         if isinstance(v, tuple):
-            n, regs, r = v
-            lines.append(f"✅ <b>{H.escape(gid)}</b>: {n} ta" + (f" ({', '.join(regs)})" if regs else "") + f"\n    namuna: {H.escape(str(r[4]))} → ${r[7]} → <b>{dx_price_tjs(r[7])}</b> somoni")
+            n, regs, r, src = v
+            lines.append(f"✅ <b>{H.escape(gid)}</b>: {n} ta" + (f" ({', '.join(regs)}) · region manbasi: {src}" if regs else " · ⚠ region topilmadi, /dxraw products?kind=topup&limit=2 natijasini yuboring") + f"\n    namuna: {H.escape(str(r[4]))} → ${r[7]} → <b>{dx_price_tjs(r[7])}</b> somoni")
         else: lines.append(f"❌ <b>{H.escape(gid)}</b>: {H.escape(str(v))}")
     await say_chunks(m, lines + ["", f"Ustama: +{C.DX_MARKUP * 100:g}% · kurs: {C.USD_TJS:g}", "Topilmaganlar uchun: /dxcats so'z va /dxcat o'yin_id kategoriya"])
 
@@ -609,33 +611,68 @@ def _qty(name):
 def dx_match(p, gm, cat, qq):
     keys = [k for k in (nz(cat), nz(gm["name"])) if k]
     return any(nz(p.get("category_id")).startswith(k) for k in keys) or bool(nz(qq) and nz(p.get("category_name")) == nz(qq))
+REGION_KEYS = ("region", "region_code", "region_id", "region_name", "region_title", "country", "country_code", "server", "zone", "locale", "area")
+def p_region(p):
+    for k in REGION_KEYS:
+        v = p.get(k)
+        if v not in (None, "", []): return str(v)
+    return ""
+def tab_for(name, emo, kind):
+    if kind == "telegram_stars": return "⭐"
+    if kind.startswith("telegram"): return "💎"
+    mm = re.match(r"\s*\d[\d\s.,]*\s*(.*)", str(name))
+    if mm and re.match(r"\s*\d", str(name)):   # raqam bilan boshlansa: valyuta paketi (Diamonds, UC, ...)
+        unit = re.sub(r"[^\w\s+.\-]", "", mm.group(1), flags=re.UNICODE).strip()[:14]
+        return f"{emo or '💎'} {unit}".strip()
+    return "📑 Pass"
 async def dx_sync(only=None):
-    """Donatix'dan o'yinlar va paketlarni oladi (miqdorlari Donatix'dagidek). {o'yin_id: (soni, regionlar) | xato matni}"""
+    """Donatix'dan o'yinlar va paketlarni oladi (miqdorlari Donatix'dagidek, region bo'yicha). {o'yin_id: (soni, regionlar, namuna, manba) | xato matni}"""
     rep = {}
     if not C.USD_TJS: return {"_": "USD_TJS yozilmagan (Render → Environment)"}
     for gm in C.DX_GAMES:
         if only and gm["id"] != only: continue
         cfg = D.dxgame_get(gm["id"]); cat = (cfg["cat"] if cfg else "") or gm.get("cat", ""); qq = (cfg["q"] if cfg else "") or gm.get("q", "")
-        kind = gm["kind"]; tg = kind.startswith("telegram")
+        kind = gm["kind"]; tg = kind.startswith("telegram"); found_all = None
         try:
-            if tg: prods = await DX.products(kind=kind, pages=1, limit=100)
+            if tg: prods = [p for p in await DX.products(kind=kind, pages=1, limit=100) if str(p.get("kind") or kind) == kind]
             else:
                 prods = await DX.products(category=cat) if cat else []
-                if not prods and qq: prods = [p for p in await DX.products(q=qq) if dx_match(p, gm, cat, qq)]
-            rows = []
-            for p in prods:
+                if not prods and qq:
+                    found_all = await DX.products(q=qq)
+                    prods = [p for p in found_all if dx_match(p, gm, cat, qq)]
+            prods = [p for p in prods if p.get("product_id")]
+            if not prods:
+                hint = ""
+                if found_all:
+                    cats = {}
+                    for p in found_all: cats.setdefault(str(p.get("category_id")), str(p.get("category_name") or ""))
+                    hint = ". Qidiruvda topilgan kategoriyalar: " + ", ".join(f"{k} ({v})" for k, v in list(cats.items())[:8]) + f" → /dxcat {gm['id']} kategoriya_id"
+                rep[gm["id"]] = "Donatix'da mahsulot topilmadi" + hint; continue
+            regs = [p_region(p) for p in prods]; src = "region" if any(regs) else ""
+            if not any(regs):   # region maydoni yo'q: kategoriya nomidagi qo'shimchadan olamiz (free_fire_cis -> CIS)
+                cats = [str(p.get("category_id") or "") for p in prods]
+                if len(set(cats)) > 1:
+                    pre = os.path.commonprefix(cats)
+                    regs = [(c[len(pre):].strip("_- ") or str(p.get("category_name") or "")).upper() for c, p in zip(cats, prods)]; src = "kategoriya"
+            if not any(regs):   # nom oxiridagi (CIS) / [Global]
+                nm = [re.search(r"[\(\[]([^\)\]]{2,20})[\)\]]\s*$", str(p.get("name") or "")) for p in prods]
+                if sum(1 for x in nm if x) * 2 >= len(prods) and any(nm): regs = [x.group(1).upper() if x else "" for x in nm]; src = "nom"
+            best = {}
+            for p, rg in zip(prods, regs):
                 try: usd = float(p.get("price_usd") or 0)
                 except Exception: usd = 0
-                if not p.get("product_id") or usd <= 0: continue
+                if usd <= 0: continue
                 name = str(p.get("name") or p.get("title") or p["product_id"]); emo = p.get("emoji") or ""
                 shown = name if (not emo or emo in name) else f"{name} {emo}"
-                numeric = _qty(name) > 0 and not re.search(r"(?i)week|month|pass|voucher|ваучер|недел|месяц", name)
-                tab = ("⭐" if kind == "telegram_stars" else "💎") if tg else ("💎" if numeric else "📑 Pass")
-                rows.append((p["product_id"], gm["id"], str(p.get("region") or ""), str(p.get("region_title") or p.get("region") or ""), shown, tab, emo, usd,
-                             json.dumps(p.get("fields") or [], ensure_ascii=False), kind, _qty(name), int(p.get("min_quantity") or 0), int(p.get("max_quantity") or 0)))
+                title = str(p.get("region_title") or rg)
+                row = (p["product_id"], gm["id"], rg, title, shown, tab_for(name, emo, kind), emo, usd,
+                       json.dumps(p.get("fields") or [], ensure_ascii=False), kind, _qty(name), int(p.get("min_quantity") or 0), int(p.get("max_quantity") or 0))
+                k = (rg, shown)
+                if k not in best or usd < best[k][7]: best[k] = row   # bir xil paket takrorlansa eng arzonini qoldiramiz
+            rows = list(best.values())
             if not rows: rep[gm["id"]] = "Donatix'da mahsulot topilmadi"; continue
             D.dxcat_replace(gm["id"], rows)
-            rep[gm["id"]] = (len(rows), sorted({r[2] for r in rows if r[2]}), rows[0])
+            rep[gm["id"]] = (len(rows), sorted({r[2] for r in rows if r[2]}), rows[0], src or "yo'q")
         except Exception as e:
             logging.exception("dx_sync"); rep[gm["id"]] = f"xato: {e}"
     return rep
@@ -660,6 +697,7 @@ def dx_catalog():
             for r in rows:
                 if r["region"] and r["region"] not in regs: regs.append(r["region"])
                 g["tabs"].setdefault(r["tab"], []).append({"id": r["product_id"], "name": r["name"], "price": dx_price_tjs(r["price_usd"]), "region": r["region"]})
+            regs.sort(key=lambda x: (0 if x.upper() == "CIS" else 1 if x.upper() == "GLOBAL" else 2, x))
             if regs: g["regions"] = regs; g["region_titles"] = {r["region"]: r["region_title"] for r in rows if r["region"]}
         dyn[gm["id"]] = g
     return [dyn[x["id"]] for x in C.DX_GAMES if x["id"] in dyn] + [x for x in C.CATALOG["games"] if x["id"] not in dyn]
@@ -778,7 +816,7 @@ async def order(r):
         sku = dx_resolve(i["id"], region); fields = {"player_id": pid}   # Donatix'ga bog'langan bo'lsa avto
     oid = D.buy(uid, f"{gname} {product}", pid, price, gname, iname, fj, qty)  # narx serverdan olinadi
     if oid == -1: return web.json_response({"error": "pending"})
-    if not oid: return web.json_response({"error": "funds"})
+    if not oid: return web.json_response({"error": "funds", "need": price, "balance": round(D.user(uid)["balance"], 2)})
     if nick: D.q("UPDATE orders SET nick=? WHERE id=?", (nick, oid))
     full = f"{tg.get('first_name', '')} {tg.get('last_name', '')}".strip() or "—"
     un = f"@{tg['username']}" if tg.get("username") else "—"
@@ -792,7 +830,7 @@ async def order(r):
     await notify(uid, "acc", D.q("SELECT * FROM orders WHERE id=?", (oid,)).fetchone())
     if sku:
         t = asyncio.create_task(dx_place(oid, price, sku, fields, qty if stars else None)); TASKS.add(t); t.add_done_callback(TASKS.discard)
-    return web.json_response({"ok": True, "balance": round(D.user(uid)["balance"], 2)})
+    return web.json_response({"ok": True, "balance": round(D.user(uid)["balance"], 2), "price": price, "game": gname, "item": iname, "nick": nick})
 
 async def topup(r):
     d = await r.json()
@@ -803,6 +841,37 @@ async def topup(r):
     if D.has_pending(r["u"]["id"]): return web.json_response({"error": "pending"})
     pa = a if x["cur"] == "TJS" else round(a / C.RATE)
     return web.json_response({"ok": True, "id": 0, "amount": a, "pay": pa, "cur": x["cur"], "type": x["type"], "value": x["value"], "holder": x["holder"], "name": x["name"], "icon": x["icon"], "color": x["color"], "method": x["id"]})
+def _digits(s): return re.sub(r"\D", "", str(s or ""))
+def ai_report(res, want, value):
+    """AI natijasini admin uchun matnga aylantiradi (qaror admin'da qoladi)."""
+    if not res: return "🤖 AI tekshiruv: natija olinmadi"
+    e = H.escape; L = []; warn = False
+    if res.get("is_receipt") is False: L.append("🚨 Bu o'tkazma cheki emasga o'xshaydi"); warn = True
+    if res.get("status") == "failed": L.append("⚠ O'tkazma muvaffaqiyatsiz ko'rinadi"); warn = True
+    amt = res.get("amount")
+    if isinstance(amt, (int, float)):
+        if abs(float(amt) - want) > 0.01: L.append(f"⚠ Summa mos emas: chekda {amt:g}, so'ralgan {want:g}"); warn = True
+    elif res.get("is_receipt") is not False: L.append("⚠ Summa chekdan o'qilmadi"); warn = True
+    rcp, mine = _digits(res.get("recipient")), _digits(value)
+    if mine and rcp and mine[-4:] not in rcp: L.append("⚠ Qabul qiluvchi raqam bizniki bilan mos emas"); warn = True
+    try:
+        dt = datetime.strptime(str(res.get("date")), "%Y-%m-%d %H:%M"); now = datetime.now(timezone(timedelta(hours=C.TZ_HOURS))).replace(tzinfo=None)
+        if dt > now + timedelta(hours=1): L.append("⚠ Chek sanasi kelajakda"); warn = True
+        elif dt < now - timedelta(hours=36): L.append("⚠ Chek eski (36 soatdan ortiq)"); warn = True
+    except Exception: pass
+    ts = [str(x) for x in (res.get("tamper_signs") or [])][:3]
+    if ts: L.append("⚠ Tahrir belgilari: " + e(", ".join(ts))); warn = True
+    info = []
+    if isinstance(amt, (int, float)): info.append(f"summa {amt:g} {e(str(res.get('currency') or ''))}".strip())
+    if res.get("date"): info.append("sana " + e(str(res["date"])))
+    if res.get("recipient"): info.append("qabul qiluvchi " + e(str(res["recipient"])))
+    return ("🤖 <b>AI tekshiruv:</b> " + ("⚠ <b>shubhali</b>" if warn else "✅ <b>mos keladi</b>")) + ("\n" + "\n".join(L) if L else "") + ("\n<i>Chekda: " + "; ".join(info) + "</i>" if info else "")
+async def rcpt_ai_task(tid, msg_id, cap, kb, raw, want, value):
+    try:
+        txt = ai_report(await AI.analyze(raw, "image/png" if raw[:4] == b"\x89PNG" else "image/jpeg"), want, value)
+        t = D.q("SELECT status FROM topups WHERE id=?", (tid,)).fetchone()
+        await bot.edit_message_caption(chat_id=C.ADMIN_ID, message_id=msg_id, caption=cap + "\n\n" + txt, parse_mode="HTML", reply_markup=kb if (t and t["status"] == "pending") else None)
+    except Exception: logging.exception("rcpt_ai_task")
 async def receipt_api(r):
     d = await r.json(); uid = r["u"]["id"]; tg = r["tg"]
     try: a = float(d.get("amount", 0))
@@ -812,6 +881,8 @@ async def receipt_api(r):
     except Exception: raw = b""
     if not x or not 10 <= a <= 5000 or not 1000 < len(raw) < 6_000_000 or not (raw[:3] == b"\xff\xd8\xff" or raw[:4] == b"\x89PNG"):
         return web.json_response({"error": "bad"})
+    h = hashlib.sha256(raw).hexdigest()
+    if D.rhash_get(h): return web.json_response({"error": "dup"})   # shu chek avval ishlatilgan
     tid = D.add_topup(uid, a, x["id"])
     if tid == -1: return web.json_response({"error": "pending"})
     e = H.escape
@@ -821,10 +892,14 @@ async def receipt_api(r):
     cap = (f"💳 <b>Balans to'ldirish #{tid}</b>\n🏦 Usul: <b>{e(x['name'].upper())}</b>\n💵 Mablag': <b>{a:g} somoni</b>\n"
            f"🆔 Telegram ID: <code>{uid}</code>\n👤 Ism: {e(full)}\n🔗 Username: {e(un)}\n🕒 Vaqt: {when}")
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✅ Tasdiqlash", callback_data=f"ok{tid}"), InlineKeyboardButton(text="❌ Rad etish", callback_data=f"no{tid}")]])
-    try: await bot.send_photo(C.ADMIN_ID, BufferedInputFile(raw, "receipt.jpg"), caption=cap, parse_mode="HTML", reply_markup=kb)
+    if AI.enabled(): cap += "\n\n🤖 AI tekshirmoqda..."
+    try: sent = await bot.send_photo(C.ADMIN_ID, BufferedInputFile(raw, "receipt.jpg"), caption=cap, parse_mode="HTML", reply_markup=kb)
     except Exception:
         logging.exception("receipt: admin send failed"); D.q("DELETE FROM topups WHERE id=?", (tid,))
         return web.json_response({"error": "send"})
+    D.rhash_add(h, tid)
+    if AI.enabled():
+        tk = asyncio.create_task(rcpt_ai_task(tid, sent.message_id, cap.replace("\n\n🤖 AI tekshirmoqda...", ""), kb, raw, a, x["value"])); TASKS.add(tk); tk.add_done_callback(TASKS.discard)
     await tell(uid, "rcv", no=tid, amt=f"{a:g}", method=f"{x['name']} ({T[lang_of(uid)]['kind_' + x['type']]})")
     return web.json_response({"ok": True})
 async def reviews(r):
