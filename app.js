@@ -15,12 +15,12 @@ async function init(){
   if(localStorage.getItem("light"))document.body.classList.add("light");
   render();if(new URLSearchParams(location.search).get("go")=="hist")go("hist");setTimeout(()=>$("#splash").classList.add("hide"),Math.max(0,3000-(Date.now()-T0)))}
 function render(){
-  const v=S.view,m={menu,game,topup,meth,hist,friends,set,rev,top:topv,res:resv,pay:payv},sub=["game","topup","meth","pay","rev","res"].includes(v);
+  const v=S.view,m={menu,game,topup,meth,hist,friends,set,rev,top:topv,res:resv,adm,admg,pay:payv},sub=["game","topup","meth","pay","rev","res","adm","admg"].includes(v);
   $("#app").innerHTML=m[v]();
   $("#nav").style.display=v=="res"?"none":"";
-  $("#nav").innerHTML=NAV.map(([k,i,n])=>`<a class="${v==k||(k=="menu"&&sub)||(k=="friends"&&v=="top")?"on":""}" onclick="go('${k}')">${I(i)}<span>${t(n)}</span></a>`).join("");
+  $("#nav").innerHTML=NAV.map(([k,i,n])=>`<a class="${v==k||(k=="menu"&&sub)||(k=="friends"&&v=="top")||(k=="set"&&(v=="adm"||v=="admg"))?"on":""}" onclick="go('${k}')">${I(i)}<span>${t(n)}</span></a>`).join("");
   if(tg)tg.BackButton[(sub||v=="top")?"show":"hide"]()}
-tg?.BackButton.onClick(()=>go(S.view=="top"?"friends":"menu"));
+tg?.BackButton.onClick(()=>go(({top:"friends",admg:"adm",adm:"set"})[S.view]||"menu"));
 const gi=g=>`<img class="gimg" src="/${g.id}.png?v=3" onerror="this.style.display='none'">`;
 function menu(){const u=S.u,tgu=tg?.initDataUnsafe?.user||{};
   const games=S.cat.games.map(g=>`<div class="game" onclick="openGame('${g.id}')"><i style="background:${g.color}">${gi(g)}${g.icon}</i>${g.name}</div>`).join("");
@@ -155,6 +155,7 @@ tup:'<path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/>',
 tdn:'<path d="M3 7l6 6 4-4 8 8"/><path d="M15 17h6v-6"/>',
 copy:'<rect x="9" y="9" width="12" height="12" rx="2.5"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/>',
 back:'<path d="M15 6l-6 6 6 6"/>',
+tools:'<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/>',
 trophy:'<path d="M8 4h8v5a4 4 0 0 1-8 0z"/><path d="M8 6H5.5a1 1 0 0 0-1 1c0 2 1.5 3.5 3.5 4M16 6h2.5a1 1 0 0 1 1 1c0 2-1.500 3.5-3.5 4M12 13v4M8.5 20h7M10 17h4"/>',
 wallet:'<path d="M4 7.5A2.5 2.5 0 0 1 6.5 5H18v3"/><rect x="3.5" y="8" width="17" height="11.5" rx="2.5"/><path d="M16 13.8h2.2"/>'
 };
@@ -164,6 +165,47 @@ const gid=n=>{const g=(S.cat.games||[]).find(x=>x.name==n);return g?g.id:""};
 const ST={done:"st_done",pending:"st_wait",processing:"st_wait",cancelled:"st_cancel"};
 function setH(k,v){S[k]=v;render()}
 async function refreshHist(){const r=await api("/api/history");if(r){S.hist=r;render()}}
+const admBack=(to,title)=>`<div class="flex" style="align-items:center;gap:14px;margin:6px 0 16px"><div class="av" style="background:var(--card);border:1px solid var(--line);color:var(--tx);width:48px;height:48px" onclick="go('${to}')">${I("back",22)}</div><h1 style="font-size:24px">${title}</h1></div>`;
+async function admOpen(){const r=await api("/api/admin/games");if(r&&r.ok){S.adm=r;go("adm")}else alert(t("err"))}
+function adm(){const A=S.adm||{games:[],settings:{}};
+  return admBack("set","🛠 Admin panel")+`<div class="card"><div class="lbl">UMUMIY SOZLAMALAR</div><div class="flex"><div style="flex:1"><small style="color:var(--mut)">Ustama, %</small><input id="a_mk" type="number" step="0.5" value="${A.settings.markup}"></div><div style="flex:1"><small style="color:var(--mut)">1 USD = ? somoni</small><input id="a_rt" type="number" step="0.01" value="${A.settings.usd_tjs}"></div></div><small style="color:var(--mut);display:block;margin:10px 0">Donatix narxlariga qo'llanadi. Qo'lda o'zgartirilgan narxlarga ta'sir qilmaydi.</small><button class="btn" onclick="admSaveSet()">Saqlash</button></div>
+  <div class="lbl">O'YINLAR</div>${A.games.map((g,i)=>`<div class="card" style="display:flex;align-items:center;gap:12px;padding:14px 16px;${g.hidden?"opacity:.55":""}" onclick="admGame(${i})"><div class="av" style="background:${esc(g.color)};border-radius:14px">${esc(g.icon)}</div><div style="flex:1;min-width:0"><b>${esc(g.name)}</b><br><small style="color:var(--mut)">${g.count} ta mahsulot${g.hidden?" · yashirin":""}</small></div><span style="color:var(--mut)">›</span></div>`).join("")}`}
+async function admSaveSet(){const r=await api("/api/admin/save",{game:"",settings:{markup:+$("#a_mk").value,usd_tjs:+$("#a_rt").value}});if(r&&r.ok){toast("Saqlandi");S.cat=(await api("/api/catalog"))||S.cat;admOpen()}else alert((r&&r.msg)||t("err"))}
+async function admLoad(id,keep){const r=await api("/api/admin/game?id="+encodeURIComponent(id));if(!(r&&r.ok&&r.game))return alert(t("err"));
+  S.ad={...r.game,ed:{},adds:[],dels:[],rg:{},newRegs:[],cur:keep===undefined?null:keep,hide:r.game.hidden};go("admg")}
+function admGame(i){admLoad(S.adm.games[i].id)}
+const admRegs=()=>{const a=S.ad,m=new Map();a.regions.forEach(x=>m.set(x.region,{...x}));a.newRegs.forEach(x=>m.set(x.region,{...x,fresh:1}));Object.entries(a.rg).forEach(([k,v])=>{if(m.has(k))Object.assign(m.get(k),v)});return [...m.values()]};
+const admRows=()=>{const a=S.ad;const base=a.items.filter(x=>!a.dels.includes(x.id)).map(x=>({...x,...(a.ed[x.id]||{})}));const add=a.adds.map((x,i)=>({...x,id:"new"+i,src:"new",auto:null,ov:false}));return [...base,...add].filter(x=>a.cur===null||x.region==a.cur)};
+function admE(id,k,v){const a=S.ad;if(id.startsWith("new")){const x=a.adds[+id.slice(3)];if(x)x[k]=k=="price"?+v:v;return}const e=(a.ed[id]=a.ed[id]||{});e[k]=k=="price"?+v:v;if(k=="price")delete e.reset}
+function admT(id){const x=admRows().find(r=>r.id==id);if(!x)return;if(id.startsWith("new"))S.ad.adds[+id.slice(3)].hidden=!x.hidden;else(S.ad.ed[id]=S.ad.ed[id]||{}).hidden=!x.hidden;render()}
+function admReset(id){const e=(S.ad.ed[id]=S.ad.ed[id]||{});e.reset=true;e.price=S.ad.items.find(r=>r.id==id).auto;render()}
+function admD(id){if(id.startsWith("new"))S.ad.adds.splice(+id.slice(3),1);else if(!S.ad.dels.includes(id))S.ad.dels.push(id);render()}
+function admCur(i){const rs=admRegs();S.ad.cur=i<0?null:rs[i].region;render()}
+function admRegAdd(){const v=$("#a_nr").value.trim().slice(0,20);if(!/^[\w .\-]{1,20}$/.test(v))return alert("Region nomi: harf yoki raqam, 20 belgigacha");if(admRegs().some(r=>r.region==v)){S.ad.cur=v;return render()}S.ad.newRegs.push({region:v,title:"",hidden:false});S.ad.cur=v;render()}
+function admRegE(k,v){const a=S.ad,nr=a.newRegs.find(x=>x.region==a.cur);if(nr){nr[k]=v;return}(a.rg[a.cur]=a.rg[a.cur]||{})[k]=v}
+function admRegHide(){const r=admRegs().find(x=>x.region==S.ad.cur);if(!r)return;admRegE("hidden",!r.hidden);render()}
+function admAdd(){const n=$("#a_n").value.trim().slice(0,60),p=+$("#a_p").value;if(!n||!(p>=0.1))return alert("Nom va narxni kiriting (narx kamida 0.1)");
+  S.ad.adds.push({name:n,price:p,region:S.ad.cur||"",tab:($("#a_t").value.trim().slice(0,20))||"📦",sku:$("#a_s").value.trim().slice(0,60),hidden:false});render()}
+const admDirty=()=>{const a=S.ad;return a&&(Object.keys(a.ed).length||a.adds.length||a.dels.length||Object.keys(a.rg).length||a.newRegs.length||a.hide!==a.hidden)};
+function admg(){const a=S.ad;if(!a)return"";const rs=admRegs(),cr=rs.find(x=>x.region==a.cur),rows=admRows();
+  const chips=`<div class="reg chips" style="margin:0 0 12px"><a class="${a.cur===null?"on":""}" onclick="admCur(-1)">Hammasi</a>${rs.map((r,i)=>`<a class="${a.cur===r.region?"on":""}" onclick="admCur(${i})" style="${r.hidden?"opacity:.5":""}">${esc(r.title||r.region)}</a>`).join("")}</div>`;
+  const regCard=cr?`<div class="card"><div class="lbl">REGION: ${esc(cr.region)}</div><input placeholder="Ko'rinadigan nom (ixtiyoriy)" value="${esc(cr.title||"")}" oninput="admRegE('title',this.value)" style="margin-bottom:10px"><div class="flex" style="align-items:center;justify-content:space-between"><b>${cr.hidden?"Yashirin (mijoz ko'rmaydi)":"Ko'rinadi"}</b><div class="sw ${cr.hidden?"off":""}" onclick="admRegHide()"></div></div></div>`:"";
+  const list=rows.map(x=>{const id=esc(x.id),del=(x.src=="cust"||x.src=="new");
+    return `<div class="card" style="padding:14px 16px;${x.hidden?"opacity:.55":""}"><div class="flex" style="align-items:center;gap:8px;margin-bottom:10px"><input value="${esc(x.name)}" oninput="admE('${id}','name',this.value)" ${x.src=="stars"?"disabled":""} style="flex:1"><div class="sw ${x.hidden?"off":""}" onclick="admT('${id}')"></div></div>
+    <div class="flex" style="align-items:center;gap:10px"><input type="number" step="0.01" value="${x.price}" oninput="admE('${id}','price',this.value)" style="flex:1"><small style="color:var(--mut);width:90px;text-align:center">${esc(x.region||"hamma")}</small>${del?`<a onclick="admD('${id}')" style="color:var(--bad);font-size:20px">🗑</a>`:""}</div>
+    <small style="color:var(--mut);display:block;margin-top:8px">${{dx:"Donatix",static:"oddiy",cust:"qo'lda",new:"yangi (saqlanmagan)",stars:"Donatix"}[x.src]||""}${x.auto!=null?` · avto narx: ${x.auto}${x.ov||(a.ed[x.id]&&a.ed[x.id].price!==undefined&&a.ed[x.id].price!=x.auto)?` · <a onclick="admReset('${id}')" style="color:#8b7bff">avtoga qaytarish</a>`:""}`:""}${x.sku?` · kod: ${esc(x.sku)}`:""}</small></div>`}).join("");
+  return `<div class="flex" style="align-items:center;gap:14px;margin:6px 0 16px"><div class="av" style="background:var(--card);border:1px solid var(--line);color:var(--tx);width:48px;height:48px" onclick="go('adm')">${I("back",22)}</div><h1 style="font-size:23px;flex:1">${esc(a.name)}</h1><div class="sw ${a.hide?"off":""}" onclick="S.ad.hide=!S.ad.hide;render()" title="O'yinni ko'rsatish"></div></div>
+  ${a.hide?`<div class="card" style="color:var(--bad)">Bu o'yin mijozlarga ko'rinmaydi</div>`:""}${chips}${regCard}
+  <div class="card"><div class="lbl">YANGI REGION</div><div class="flex"><input id="a_nr" placeholder="masalan: CIS, Global, Tojikiston" style="flex:1"><button class="btn" style="width:auto;padding:0 18px" onclick="admRegAdd()">＋</button></div></div>
+  <div class="lbl">MAHSULOTLAR (${rows.length})</div>${list||`<p style="color:var(--mut)">Bu yerda mahsulot yo'q.</p>`}
+  <div class="card"><div class="lbl">YANGI MAHSULOT ${a.cur?"("+esc(a.cur)+")":""}</div><input id="a_n" placeholder="Nomi (masalan: 100 Diamonds)" style="margin-bottom:10px"><div class="flex" style="margin-bottom:10px"><input id="a_p" type="number" step="0.01" placeholder="Narx (somoni)" style="flex:1"><input id="a_t" placeholder="Bo'lim (💎)" style="flex:1"></div><input id="a_s" placeholder="Donatix mahsulot kodi (ixtiyoriy, avto yetkazish uchun)" style="margin-bottom:10px"><button class="btn" style="background:var(--card2)" onclick="admAdd()">＋ Mahsulot qo'shish</button></div>
+  <div class="buy"><button class="btn" id="a_save" onclick="admSave()">Saqlash${admDirty()?" ●":""}</button></div>`}
+async function admSave(){const a=S.ad,b=$("#a_save");if(b)b.disabled=true;
+  const edits=Object.entries(a.ed).map(([id,e])=>({id,...e}));
+  const adds=a.adds.map(x=>({region:x.region,tab:x.tab,name:x.name,price:x.price,sku:x.sku,hidden:!!x.hidden}));
+  const regions=admRegs().filter(r=>r.fresh||a.rg[r.region]).map(r=>({region:r.region,title:r.title||"",hidden:!!r.hidden}));
+  const r=await api("/api/admin/save",{game:a.id,edits,adds,dels:a.dels.map(x=>x.slice(1)),regions,hide_game:!!a.hide});
+  if(r&&r.ok){toast("Saqlandi ✓");S.cat=(await api("/api/catalog"))||S.cat;admLoad(a.id,a.cur)}else{if(b)b.disabled=false;alert((r&&r.msg)||t("err"))}}
 function hist(){const H=S.hist,tab=S.htab||"orders";
   const head=`<div class="flex" style="align-items:center;justify-content:space-between;margin:10px 0 18px"><h1>${t("history")}</h1><div class="av" style="background:var(--card);border:1px solid var(--line);color:var(--tx)" onclick="refreshHist()">${I("refresh",22)}</div></div>
   <div class="seg" style="margin:0 0 16px"><a class="${tab=="orders"?"on":""}" onclick="setH('htab','orders')">${t("orders")}</a><a class="${tab=="fin"?"on":""}" onclick="setH('htab','fin')">${t("finance")}</a></div>`;
@@ -189,7 +231,7 @@ const sec=()=>modal(t("security"),t("security_body"),t("gotit"));
 function set(){const u=S.u,tu=tg?.initDataUnsafe?.user||{},nm=esc(((tu.first_name||"")+" "+(tu.last_name||"")).trim()||"—"),light=document.body.classList.contains("light");
   const av=tu.photo_url?`<img src="${esc(tu.photo_url)}" style="width:100%;height:100%;object-fit:cover">`:ini(tu.first_name);
   const mini=(lb,val,col)=>`<div style="flex:1;background:#ffffff0d;border:1px solid #ffffff14;border-radius:18px;padding:14px 16px"><small style="color:var(--mut);font-weight:700;letter-spacing:.06em">${t(lb).toUpperCase()}</small><div style="font-size:26px;font-weight:800;margin-top:6px;color:${col}">${fmt(val)} <small style="font-size:13px;color:var(--mut);font-weight:600">${t("cur")}</small></div></div>`;
-  const rows=[["uplus","#12302a","#22c993","invite","go('friends')"],["bell","#33290f","#facc15","notif","note()"],["chat","#12303a","#38bdf8","support","sup()"],["star","#33290f","#facc15","reviews","openReviews()"],["shield","#1d2347","#8b7bff","security","sec()"]].map(([ic,bg,col,k,fn])=>`<div class="mr" onclick="${fn}"><div class="ti" style="background:${bg};color:${col}">${I(ic,22)}</div><b>${t(k)}</b><span class="chv">${I("chev",20)}</span></div>`).join("");
+  const rows=[["uplus","#12302a","#22c993","invite","go('friends')"],["bell","#33290f","#facc15","notif","note()"],["chat","#12303a","#38bdf8","support","sup()"],["star","#33290f","#facc15","reviews","openReviews()"],["shield","#1d2347","#8b7bff","security","sec()"]].concat(S.u.admin?[["tools","#2a2150","#a78bfa","!Admin panel (narx va mahsulotlar)","admOpen()"]]:[]).map(([ic,bg,col,k,fn])=>`<div class="mr" onclick="${fn}"><div class="ti" style="background:${bg};color:${col}">${I(ic,22)}</div><b>${k[0]=="!"?k.slice(1):t(k)}</b><span class="chv">${I("chev",20)}</span></div>`).join("");
   return `<h1 style="margin:10px 0 16px">${t("profile")}</h1>
   <div class="card" style="background:linear-gradient(160deg,#171a33,#0d0f1c);padding:22px"><div class="flex" style="align-items:center;gap:16px;margin-bottom:18px"><div class="ring"><div>${av}</div></div><div style="min-width:0"><b style="font-size:20px">${nm}</b><br><small style="color:var(--mut)">${tu.username?"@"+esc(tu.username):""}</small><div class="chip" onclick="cp(${tu.id||0})">ID: ${tu.id||""} ${I("copy",14)}</div></div></div>
   <div class="flex" style="margin-bottom:16px">${mini("balance",u.balance,"var(--tx)")}${mini("spent",u.spent,"#f59a0b")}</div><button class="btn" style="background:#3b3399" onclick="go('topup')">${t("topup")}</button></div>

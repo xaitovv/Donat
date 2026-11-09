@@ -11,7 +11,7 @@ from aiohttp import web
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart, CommandObject
 from aiogram.types import (Message, CallbackQuery, InlineKeyboardMarkup,
-                           InlineKeyboardButton, WebAppInfo, BufferedInputFile, FSInputFile)
+                           InlineKeyboardButton, WebAppInfo, BufferedInputFile, FSInputFile, InputMediaDocument)
 import config as C, database as D, donatix as DX
 
 # Baza tuzilmasini o'zi tekshiradi (database.py eski bo'lsa ham ishlayveradi)
@@ -26,6 +26,11 @@ for _s in ("CREATE TABLE IF NOT EXISTS ratings(oid INTEGER PRIMARY KEY,uid INTEG
            "ALTER TABLE orders ADD COLUMN qty INTEGER DEFAULT 1",
            "CREATE TABLE IF NOT EXISTS dxcat(product_id TEXT PRIMARY KEY,game_id TEXT,region TEXT,region_title TEXT,name TEXT,tab TEXT,emoji TEXT,price_usd REAL,fields TEXT,kind TEXT,sort INTEGER,qmin INTEGER,qmax INTEGER,active INTEGER DEFAULT 1)",
            "CREATE TABLE IF NOT EXISTS dxgames(game_id TEXT PRIMARY KEY,cat TEXT,q TEXT)",
+           "CREATE TABLE IF NOT EXISTS settings(k TEXT PRIMARY KEY,v TEXT)",
+           "CREATE TABLE IF NOT EXISTS catover(item_id TEXT PRIMARY KEY,name TEXT,price REAL,hidden INTEGER DEFAULT 0)",
+           "CREATE TABLE IF NOT EXISTS catcust(id INTEGER PRIMARY KEY AUTOINCREMENT,game_id TEXT,region TEXT,tab TEXT,name TEXT,price REAL,sku TEXT DEFAULT '',hidden INTEGER DEFAULT 0)",
+           "CREATE TABLE IF NOT EXISTS catregion(game_id TEXT,region TEXT,title TEXT,hidden INTEGER DEFAULT 0,PRIMARY KEY(game_id,region))",
+           "CREATE TABLE IF NOT EXISTS gamehide(game_id TEXT PRIMARY KEY)",
            "CREATE TABLE IF NOT EXISTS rhash(h TEXT PRIMARY KEY,tid INTEGER)",
            "CREATE TABLE IF NOT EXISTS dxmap(item_id TEXT,region TEXT,product_id TEXT,PRIMARY KEY(item_id,region))",
            "ALTER TABLE orders ADD COLUMN dx_id TEXT DEFAULT ''",
@@ -402,7 +407,7 @@ async def dx_sync_cmd(m: Message, command: CommandObject):
             n, regs, r, src = v
             lines.append(f"✅ <b>{H.escape(gid)}</b>: {n} ta" + (f" ({', '.join(regs)}) · region manbasi: {src}" if regs else " · ⚠ region topilmadi, /dxraw products?kind=topup&limit=2 natijasini yuboring") + f"\n    namuna: {H.escape(str(r[4]))} → ${r[7]} → <b>{dx_price_tjs(r[7])}</b> somoni")
         else: lines.append(f"❌ <b>{H.escape(gid)}</b>: {H.escape(str(v))}")
-    await say_chunks(m, lines + ["", f"Ustama: +{C.DX_MARKUP * 100:g}% · kurs: {C.USD_TJS:g}", "Topilmaganlar uchun: /dxcats so'z va /dxcat o'yin_id kategoriya"])
+    await say_chunks(m, lines + ["", f"Ustama: +{cfg_markup() * 100:g}% · kurs: {cfg_rate():g}", "Topilmaganlar uchun: /dxcats so'z va /dxcat o'yin_id kategoriya"])
 
 @dp.message(Command("dxcat"))
 async def dx_cat_set(m: Message, command: CommandObject):
@@ -419,6 +424,45 @@ async def dx_raw(m: Message, command: CommandObject):
     if not p or ".." in p: return await m.answer("Ishlatish: /dxraw glory/regions")
     st, d = await DX.call("GET", "/" + p)
     await m.answer(H.escape(f"HTTP {st}\n" + json.dumps(d, ensure_ascii=False)[:3500]), parse_mode="HTML")
+
+BK = {"changes": -1, "t": 0.0, "mid": None}
+async def backup_db(force=False):
+    """Baza o'zgargan bo'lsa (kamida 45 soniyada bir marta) nusxasini admin chatidagi qadalgan xabarga yangilaydi."""
+    ch = D.db.total_changes
+    if not force and (ch == BK["changes"] or time.time() - BK["t"] < 45): return False
+    path = "/tmp/diavex-backup.db"; D.snapshot(path)
+    name = "diavex-backup-" + datetime.now(timezone(timedelta(hours=C.TZ_HOURS))).strftime("%Y%m%d-%H%M") + ".db"
+    cap = "💾 Baza zaxirasi. O'chirmang va qadalgan holda qoldiring: server qayta ishga tushganda balans va buyurtmalar shundan tiklanadi."
+    mid = BK["mid"]
+    if not mid:
+        try:
+            pm = getattr(await bot.get_chat(C.ADMIN_ID), "pinned_message", None)
+            if pm and pm.document and str(pm.document.file_name or "").startswith("diavex-backup"): mid = pm.message_id
+        except Exception: logging.warning("backup: qadalgan xabar topilmadi")
+    sent = None
+    if mid:
+        try:
+            await bot.edit_message_media(chat_id=C.ADMIN_ID, message_id=mid, media=InputMediaDocument(media=FSInputFile(path, filename=name), caption=cap)); sent = mid
+        except Exception as e:
+            if "not modified" in str(e).lower(): sent = mid
+            else: logging.warning("backup: xabarni yangilab bo'lmadi (%s), yangisi yuboriladi", e)
+    if not sent:
+        msg = await bot.send_document(C.ADMIN_ID, FSInputFile(path, filename=name), caption=cap, disable_notification=True)
+        try: await bot.pin_chat_message(C.ADMIN_ID, msg.message_id, disable_notification=True)
+        except Exception: logging.exception("backup: qadab bo'lmadi")
+        sent = msg.message_id
+    BK.update(changes=ch, t=time.time(), mid=sent); return True
+async def bk_worker():
+    while True:
+        try: await backup_db()
+        except Exception: logging.exception("bk_worker")
+        await asyncio.sleep(10)
+
+@dp.message(Command("backup"))
+async def backup_cmd(m: Message):
+    if m.from_user.id != C.ADMIN_ID: return
+    try: await backup_db(force=True); await m.answer("✅ Zaxira yangilandi (qadalgan xabarga qarang).")
+    except Exception as e: await m.answer(f"❌ Zaxira xatosi: {H.escape(repr(e))[:300]}")
 
 async def on_error(event):
     logging.exception("bot error: %s", getattr(event, "exception", event)); return True
@@ -465,11 +509,11 @@ def cors():
 async def _sec(req, resp):
     resp.headers["X-Content-Type-Options"] = "nosniff"; resp.headers["Referrer-Policy"] = "no-referrer"
 
-async def catalog(r): return web.json_response({**C.CATALOG, "games": dx_catalog(), "bot": (await bot.me()).username, "support": C.SUPPORT, "rate": C.RATE, "pay": [{k: x[k] for k in ("id", "name", "type", "cur", "color", "icon")} for x in C.PAY]})
+async def catalog(r): return web.json_response({**C.CATALOG, "games": public_catalog(), "bot": (await bot.me()).username, "support": C.SUPPORT, "rate": C.RATE, "pay": [{k: x[k] for k in ("id", "name", "type", "cur", "color", "icon")} for x in C.PAY]})
 async def me(r):
     u = r["u"]; n = D.q("SELECT COUNT(*) c FROM users WHERE invited_by=?", (u["id"],)).fetchone()["c"]
     b = D.q("SELECT COUNT(*) c FROM users WHERE invited_by=? AND paid=1", (u["id"],)).fetchone()["c"]
-    return web.json_response({"balance": round(u["balance"], 2), "spent": round(u["spent"], 2), "lang": u["lang"], "ref": u["ref"], "refs": n, "buyers": b, "bonus": round(u["bonus"], 2), "rating": rstats()})
+    return web.json_response({"balance": round(u["balance"], 2), "spent": round(u["spent"], 2), "lang": u["lang"], "ref": u["ref"], "refs": n, "buyers": b, "bonus": round(u["bonus"], 2), "rating": rstats(), "admin": u["id"] == C.ADMIN_ID})
 async def lang(r):
     l = (await r.json()).get("lang")
     if l in ("ru", "uz", "tg", "en"): D.q("UPDATE users SET lang=?, lang_set=1 WHERE id=?", (l, r["u"]["id"]))
@@ -602,9 +646,143 @@ async def dx_fail(oid, why):
     if o:
         await tell(o["uid"], "ordrej", no=oid, amt=f"{o['price']:.2f}")
         await admin_say(f"❌ Buyurtma #{oid} bajarilmadi: {H.escape(str(why))}\n💰 Pul mijozga qaytarildi.")
+def cfg_rate():
+    try:
+        v = D.set_get("usd_tjs"); return float(v) if v not in (None, "") else C.USD_TJS
+    except Exception: return C.USD_TJS
+def cfg_markup():
+    try:
+        v = D.set_get("markup"); return float(v) / 100.0 if v not in (None, "") else C.DX_MARKUP
+    except Exception: return C.DX_MARKUP
+def final_catalog(include_hidden=False):
+    """Mini App ko'radigan katalog = Donatix/catalog.json + admin o'zgartirishlari (narx, nom, yashirish, qo'shilgan mahsulot va region)."""
+    ov = {r["item_id"]: r for r in D.ov_all()}; cust = D.cust_all(); regs = D.reg_all(); gh = D.ghide_all(); out = []
+    for g0 in dx_catalog():
+        g = json.loads(json.dumps(g0)); gid = g["id"]; dyn = "kind" in g
+        g["hidden"] = gid in gh
+        if g["hidden"] and not include_hidden: continue
+        hr = {r["region"] for r in regs if r["game_id"] == gid and r["hidden"]}
+        if g.get("stars"):
+            o = ov.get(g["stars"]["id"]); g["stars"]["auto"] = g["stars"]["unit"]
+            if o and o["price"] is not None: g["stars"]["unit"] = o["price"]
+            g["stars"]["hidden"] = bool(o and o["hidden"])
+            if g["stars"]["hidden"] and not include_hidden: continue
+        for tab in list(g["tabs"]):
+            keep = []
+            for it in g["tabs"][tab]:
+                o = ov.get(it["id"]); it.update(src="dx" if dyn else "static", auto=it["price"], hidden=False, ov=False)
+                if o:
+                    if o["name"]: it["name"] = o["name"]
+                    if o["price"] is not None: it["price"] = o["price"]; it["ov"] = True
+                    it["hidden"] = bool(o["hidden"])
+                if it.get("region") in hr: it["hidden"] = True
+                if it["hidden"] and not include_hidden: continue
+                keep.append(it)
+            g["tabs"][tab] = keep
+        for c in cust:
+            if c["game_id"] != gid: continue
+            it = {"id": f"c{c['id']}", "name": c["name"], "price": c["price"], "region": c["region"] or "", "src": "cust", "sku": c["sku"] or "", "auto": None, "ov": False,
+                  "hidden": bool(c["hidden"]) or (c["region"] in hr)}
+            if it["hidden"] and not include_hidden: continue
+            g["tabs"].setdefault(c["tab"] or "📦", []).append(it)
+        rl = list(g.get("regions") or []); tt = dict(g.get("region_titles") or {})
+        for r_ in regs:
+            if r_["game_id"] == gid:
+                if r_["region"] not in rl: rl.append(r_["region"])
+                if r_["title"]: tt[r_["region"]] = r_["title"]
+        for items in g["tabs"].values():
+            for it in items:
+                if it.get("region") and it["region"] not in rl: rl.append(it["region"])
+        if not include_hidden: rl = [x for x in rl if x not in hr]
+        if rl: g["regions"] = rl; g["region_titles"] = tt
+        g["hidden_regions"] = sorted(hr)
+        if not include_hidden: g["tabs"] = {k: v for k, v in g["tabs"].items() if v} or ({"⭐": []} if g.get("stars") else {})
+        out.append(g)
+    return out
+def public_catalog():
+    gs = final_catalog()
+    for g in gs:
+        for k in ("hidden", "hidden_regions"): g.pop(k, None)
+        if g.get("stars"): g["stars"].pop("auto", None); g["stars"].pop("hidden", None)
+        for items in g["tabs"].values():
+            for it in items:
+                for k in ("src", "auto", "ov", "hidden", "sku"): it.pop(k, None)
+    return gs
+def _admin(r): return r["u"]["id"] == C.ADMIN_ID
+def admin_game_view(gid):
+    fg = next((x for x in final_catalog(True) if x["id"] == gid), None)
+    if not fg: return None
+    items = []
+    for tab, its in fg["tabs"].items():
+        for it in its:
+            items.append({"id": it["id"], "name": it["name"], "region": it.get("region") or "", "tab": tab, "price": it["price"], "auto": it.get("auto"), "ov": bool(it.get("ov")),
+                          "hidden": bool(it.get("hidden")), "src": it["src"], "sku": it.get("sku", "")})
+    if fg.get("stars"):
+        s = fg["stars"]; items.append({"id": s["id"], "name": "1 ⭐ (har bir star narxi)", "region": "", "tab": "⭐", "price": round(s["unit"], 4), "auto": round(s["auto"], 4),
+                                       "ov": s["unit"] != s["auto"], "hidden": bool(s.get("hidden")), "src": "stars", "sku": ""})
+    tt = fg.get("region_titles") or {}
+    regions = [{"region": r_, "title": tt.get(r_, ""), "hidden": r_ in fg["hidden_regions"]} for r_ in (fg.get("regions") or [])]
+    return {"id": fg["id"], "name": fg["name"], "icon": fg.get("icon", ""), "color": fg.get("color", "#334"), "hidden": fg["hidden"], "regions": regions, "items": items, "stars": bool(fg.get("stars"))}
+async def admin_games(r):
+    if not _admin(r): return web.json_response({"error": "forbidden"}, status=403)
+    games = [{"id": g["id"], "name": g["name"], "icon": g.get("icon", ""), "color": g.get("color", "#334"), "hidden": g["hidden"],
+              "count": sum(len(v) for v in g["tabs"].values()) + (1 if g.get("stars") else 0)} for g in final_catalog(True)]
+    return web.json_response({"ok": True, "games": games, "settings": {"markup": round(cfg_markup() * 100, 2), "usd_tjs": cfg_rate()}})
+async def admin_game_api(r):
+    if not _admin(r): return web.json_response({"error": "forbidden"}, status=403)
+    g = admin_game_view(str(r.query.get("id", "")))
+    return web.json_response({"ok": True, "game": g}) if g else web.json_response({"error": "bad"})
+async def admin_save(r):
+    if not _admin(r): return web.json_response({"error": "forbidden"}, status=403)
+    d = await r.json(); gid = str(d.get("game") or "")
+    def num(x, lo, hi):
+        try: v = float(x)
+        except Exception: return None
+        return round(v, 4) if lo <= v <= hi else None
+    settings = {}
+    st = d.get("settings") or {}
+    if st:
+        mk, rt = num(st.get("markup"), 0, 300), num(st.get("usd_tjs"), 0.01, 1000)
+        if mk is None or rt is None: return web.json_response({"error": "bad", "msg": "Ustama 0–300, kurs 0.01–1000 bo'lishi kerak"})
+        settings = {"markup": mk, "usd_tjs": rt}
+    edits, adds, dels, regions, hide = [], [], [], [], None
+    if gid:
+        view = admin_game_view(gid)
+        if not view: return web.json_response({"error": "bad"})
+        known = {i["id"]: i for i in view["items"]}
+        for e in (d.get("edits") or [])[:500]:
+            iid = str(e.get("id") or ""); it = known.get(iid)
+            if not it: continue
+            x = {"id": iid}
+            if "name" in e:
+                nm = str(e["name"] or "").strip()[:60]
+                if it["src"] == "cust" and not nm: return web.json_response({"error": "bad", "msg": "Qo'lda qo'shilgan mahsulot nomi bo'sh bo'lmasin"})
+                if it["src"] != "stars": x["name"] = nm or None
+            if e.get("reset"): x["reset"] = True
+            elif "price" in e:
+                lo = 0.001 if it["src"] == "stars" else 0.1
+                p = num(e["price"], lo, 100000)
+                if p is None: return web.json_response({"error": "bad", "msg": f"Narx noto'g'ri: {it['name']}"})
+                x["price"] = p
+            if "hidden" in e: x["hidden"] = bool(e["hidden"])
+            edits.append(x)
+        for a in (d.get("adds") or [])[:100]:
+            nm = str(a.get("name") or "").strip()[:60]; p = num(a.get("price"), 0.1, 100000)
+            rg = str(a.get("region") or "").strip()[:20]; tb = str(a.get("tab") or "📦").strip()[:20] or "📦"; sku = str(a.get("sku") or "").strip()[:60]
+            if not nm or p is None or (rg and not re.fullmatch(r"[\w .\-]+", rg)): return web.json_response({"error": "bad", "msg": "Yangi mahsulot ma'lumoti noto'g'ri"})
+            adds.append({"name": nm, "price": p, "region": rg, "tab": tb, "sku": sku, "hidden": int(bool(a.get("hidden")))})
+        cust_ids = {int(i["id"][1:]) for i in view["items"] if i["src"] == "cust"}
+        dels = [int(x) for x in (d.get("dels") or []) if str(x).isdigit() and int(x) in cust_ids]
+        for rg in (d.get("regions") or [])[:50]:
+            nm = str(rg.get("region") or "").strip()[:20]
+            if not re.fullmatch(r"[\w .\-]+", nm): return web.json_response({"error": "bad", "msg": "Region nomi noto'g'ri"})
+            regions.append({"region": nm, "title": str(rg.get("title") or "").strip()[:30], "hidden": int(bool(rg.get("hidden")))})
+        if "hide_game" in d: hide = bool(d["hide_game"])
+    D.admin_apply(gid, edits, adds, dels, regions, hide, settings)
+    return web.json_response({"ok": True})
 def dx_price_tjs(usd, qty=1):
     """Donatix narxi (USD) -> bizning narx (somoni): kurs va ustama (standart +30%) bilan, 0.1 ga yuqoriga yaxlitlanadi."""
-    return max(0.1, math.ceil(float(usd) * qty * C.USD_TJS * (1 + C.DX_MARKUP) * 10 - 1e-9) / 10)
+    return max(0.1, math.ceil(float(usd) * qty * cfg_rate() * (1 + cfg_markup()) * 10 - 1e-9) / 10)
 nz = lambda s: re.sub(r"[^a-z0-9]", "", str(s or "").lower())
 def _qty(name):
     mm = re.search(r"\d+", str(name or "")); return int(mm.group()) if mm else 0
@@ -628,7 +806,7 @@ def tab_for(name, emo, kind):
 async def dx_sync(only=None):
     """Donatix'dan o'yinlar va paketlarni oladi (miqdorlari Donatix'dagidek, region bo'yicha). {o'yin_id: (soni, regionlar, namuna, manba) | xato matni}"""
     rep = {}
-    if not C.USD_TJS: return {"_": "USD_TJS yozilmagan (Render → Environment)"}
+    if not cfg_rate(): return {"_": "USD_TJS yozilmagan (Render → Environment)"}
     for gm in C.DX_GAMES:
         if only and gm["id"] != only: continue
         cfg = D.dxgame_get(gm["id"]); cat = (cfg["cat"] if cfg else "") or gm.get("cat", ""); qq = (cfg["q"] if cfg else "") or gm.get("q", "")
@@ -681,7 +859,7 @@ def dx_catalog():
     dyn = {}
     for gm in C.DX_GAMES:
         rows = D.dxcat_items(gm["id"])
-        if not rows or not C.USD_TJS: continue
+        if not rows or not cfg_rate(): continue
         kind = gm["kind"]; tg = kind.startswith("telegram")
         try: fl = json.loads(rows[0]["fields"] or "[]")
         except Exception: fl = []
@@ -690,7 +868,7 @@ def dx_catalog():
              "fields": [{"key": f.get("key"), "label": f.get("label") or ""} for f in fl if f.get("key") and re.fullmatch(r"\w+", str(f.get("key")))], "nocheck": tg, "tabs": {}}
         if kind == "telegram_stars":
             r = rows[0]; lo, hi = r["qmin"] or 50, r["qmax"] or 10000
-            g["stars"] = {"id": r["product_id"], "unit": r["price_usd"] * C.USD_TJS * (1 + C.DX_MARKUP), "min": lo, "max": hi, "presets": [p for p in (50, 100, 250, 500, 1000, 2500, 5000) if lo <= p <= hi] or [lo]}
+            g["stars"] = {"id": r["product_id"], "unit": r["price_usd"] * cfg_rate() * (1 + cfg_markup()), "min": lo, "max": hi, "presets": [p for p in (50, 100, 250, 500, 1000, 2500, 5000) if lo <= p <= hi] or [lo]}
             g["tabs"] = {"⭐": []}
         else:
             regs = []
@@ -703,7 +881,7 @@ def dx_catalog():
     return [dyn[x["id"]] for x in C.DX_GAMES if x["id"] in dyn] + [x for x in C.CATALOG["games"] if x["id"] not in dyn]
 def dx_find(gid, iid):
     gm = next((x for x in C.DX_GAMES if x["id"] == gid), None); r = D.dxcat_get(str(iid or ""))
-    return (gm, r) if gm and r and r["game_id"] == gid and C.USD_TJS else None
+    return (gm, r) if gm and r and r["game_id"] == gid and cfg_rate() else None
 def parse_fields(raw, keys):
     """Mijoz yuborgan maydonlarni tekshiradi (faqat ruxsat etilgan kalitlar, qisqa matn)."""
     if not isinstance(raw, dict): return None
@@ -731,8 +909,8 @@ async def dx_place(oid, price, sku, fields, qty=None):
         if not prod: return await dx_manual(oid, "Donatix mahsuloti topilmadi")
         missing = [str(f.get("key")) for f in (prod.get("fields") or []) if f.get("key") not in fields]
         if missing: return await dx_manual(oid, "qo'shimcha maydon kerak: " + ", ".join(missing))
-        if C.USD_TJS:
-            try: cost = float(prod.get("price_usd")) * (qty or 1) * C.USD_TJS
+        if cfg_rate():
+            try: cost = float(prod.get("price_usd")) * (qty or 1) * cfg_rate()
             except Exception: cost = None
             if cost is not None and cost > price:
                 return await dx_manual(oid, f"tannarx {cost:.2f} somoni sotuv narxidan ({price:g}) yuqori")
@@ -783,37 +961,55 @@ async def dx_worker():
         await asyncio.sleep(8)
 async def order(r):
     d = await r.json(); uid = r["u"]["id"]; tg = r["tg"]
-    dyn = dx_find(d.get("game"), d.get("item"))
-    if dyn:   # Donatix'dan olingan mahsulot: narx Donatix narxi + ustama
-        gm, row = dyn; kind = row["kind"]; stars = kind == "telegram_stars"
+    gid = str(d.get("game") or ""); iid = str(d.get("item") or "")
+    fg = next((x for x in final_catalog() if x["id"] == gid), None)   # admin o'zgartirishlari bilan (narx, yashirin mahsulot)
+    if not fg: return web.json_response({"error": "bad"})
+    stars = bool(fg.get("stars")) and fg["stars"]["id"] == iid
+    it = None if stars else next((i for items in fg["tabs"].values() for i in items if i["id"] == iid), None)
+    if not stars and not it: return web.json_response({"error": "bad"})
+    src = "stars" if stars else it["src"]
+    nick = ""; qty = 1; fj = ""; sku = None
+    if src in ("dx", "stars"):   # Donatix'dan olingan mahsulot
+        dyn = dx_find(gid, iid)
+        if not dyn: return web.json_response({"error": "bad"})
+        gm, row = dyn; kind = row["kind"]
         try: fl = [f.get("key") for f in json.loads(row["fields"] or "[]") if f.get("key")]
         except Exception: fl = []
         fields = parse_fields(d.get("fields"), fl or ["telegram_username" if kind.startswith("telegram") else "player_id"])
         if not fields: return web.json_response({"error": "bad"})
-        qty = 1
         if stars:
             try: qty = int(d.get("qty"))
             except Exception: return web.json_response({"error": "bad"})
             if not (row["qmin"] <= qty <= row["qmax"]): return web.json_response({"error": "bad"})
-        price = dx_price_tjs(row["price_usd"], qty); region = row["region"] or ""
-        gname = gm["name"]; iname = row["name"] + (f" × {qty}" if stars else "")
-        product = iname + (f" [{region}]" if region else ""); pid = " / ".join(fields.values()); nick = ""
+            price = max(0.1, math.ceil(fg["stars"]["unit"] * qty * 10 - 1e-9) / 10)
+        else: price = it["price"]
+        region = row["region"] or ""
+        gname = fg["name"]; iname = (it["name"] if it else row["name"]) + (f" × {qty}" if stars else "")
+        product = iname + (f" [{region}]" if region else ""); pid = " / ".join(fields.values())
         if not kind.startswith("telegram"):
             st, nick = await dx_check_fields(gm["id"], row["product_id"], fields)
             if st == "noid": return web.json_response({"error": "noid"})
         sku = row["product_id"] if (DX.enabled() and DXSTATE["on"]) else None
         fj = json.dumps(fields, ensure_ascii=False)
-    else:   # catalog.json dagi (qo'lda) mahsulot
-        g, i = C.find_item(d.get("game"), d.get("item"))
-        pid = str(d.get("pid", "")).strip()
-        if not i or not (pid.isdigit() and 5 <= len(pid) <= 14): return web.json_response({"error": "bad"})
-        region = ""
-        if g.get("regions"): region = d.get("region") if d.get("region") in g["regions"] else g["regions"][0]
-        gname = g["name"]; iname = i["name"]; price = i["price"]; qty = 1; stars = False; fj = ""
+    elif src == "cust":   # admin qo'lda qo'shgan mahsulot (sku bo'lsa Donatix orqali avto)
+        fields = parse_fields(d.get("fields"), [f["key"] for f in (fg.get("fields") or []) if f.get("key")] or ["player_id"])
+        if not fields: return web.json_response({"error": "bad"})
+        region = it.get("region") or ""; gname = fg["name"]; iname = it["name"]; price = it["price"]; stars = False
+        product = iname + (f" [{region}]" if region else ""); pid = " / ".join(fields.values())
+        sku = it.get("sku") or None
+        if sku and not (DX.enabled() and DXSTATE["on"]): sku = None
+        fj = json.dumps(fields, ensure_ascii=False)
+    else:   # catalog.json dagi mahsulot
+        pid = str(d.get("pid") or "").strip()
+        if not (pid.isdigit() and 5 <= len(pid) <= 14): return web.json_response({"error": "bad"})
+        rl = fg.get("regions") or []
+        region = d.get("region") if d.get("region") in rl else (rl[0] if rl else "")
+        gname = fg["name"]; iname = it["name"]; price = it["price"]; stars = False
         product = iname + (f" [{region}]" if region else "")
-        st, nick = await check_id(g["id"], pid, region)   # ID ni server o'zi tekshiradi
+        sg = next((x for x in C.CATALOG["games"] if x["id"] == gid), {}); rr = region if region in (sg.get("regions") or []) else ""
+        st, nick = await check_id(gid, pid, rr)   # ID ni server o'zi tekshiradi
         if st == "noid": return web.json_response({"error": "noid"})
-        sku = dx_resolve(i["id"], region); fields = {"player_id": pid}   # Donatix'ga bog'langan bo'lsa avto
+        sku = dx_resolve(iid, rr); fields = {"player_id": pid}   # Donatix'ga bog'langan bo'lsa avto
     oid = D.buy(uid, f"{gname} {product}", pid, price, gname, iname, fj, qty)  # narx serverdan olinadi
     if oid == -1: return web.json_response({"error": "pending"})
     if not oid: return web.json_response({"error": "funds", "need": price, "balance": round(D.user(uid)["balance"], 2)})
@@ -931,7 +1127,7 @@ async def main():
     app = web.Application(middlewares=[mw], client_max_size=8 * 1024 * 1024)
     app.on_response_prepare.append(_sec)
     app.add_routes([web.get("/api/catalog", catalog), web.get("/api/me", me), web.post("/api/lang", lang), web.post("/api/order", order),
-                    web.post("/api/topup", topup), web.post("/api/receipt", receipt_api), web.get("/api/history", history), web.get("/api/top", top_api), web.get("/api/checkid", checkid), web.get("/api/reviews", reviews), web.route("OPTIONS", "/{p:.*}", lambda r: web.Response()),
+                    web.post("/api/topup", topup), web.post("/api/receipt", receipt_api), web.get("/api/history", history), web.get("/api/top", top_api), web.get("/api/checkid", checkid), web.get("/api/admin/games", admin_games), web.get("/api/admin/game", admin_game_api), web.post("/api/admin/save", admin_save), web.get("/api/reviews", reviews), web.route("OPTIONS", "/{p:.*}", lambda r: web.Response()),
                     web.get("/", lambda r: web.FileResponse(os.path.join(HERE, "index.html")))])
     for f in ("style.css", "app.js", "i18n.js", "ru.json", "uz.json", "tg.json", "en.json", "logo.png", "splash.jpg"):
         app.router.add_get("/" + f, lambda r, f=f: web.FileResponse(os.path.join(HERE, f)))
@@ -941,6 +1137,7 @@ async def main():
         app.router.add_get("/" + x["id"] + ".png", _img(os.path.join(HERE, x["id"] + ".png")))
     run = web.AppRunner(app); await run.setup(); await web.TCPSite(run, "0.0.0.0", C.PORT).start()
     _t = asyncio.create_task(dx_worker()); TASKS.add(_t)
+    _b = asyncio.create_task(bk_worker()); TASKS.add(_b)
     await dp.start_polling(bot)
 if __name__ == "__main__":
     asyncio.run(main())
