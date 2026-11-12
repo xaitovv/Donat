@@ -12,7 +12,7 @@ main{padding:16px}
 .bal{background:var(--pr);border-radius:28px;padding:22px;color:#fff}
 .bal small{opacity:.8}.bal h2{font-size:48px;margin:4px 0 16px}.bal h2 span{font-size:16px;font-weight:500}
 .row3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
-.glass{background:#ffffff22;border:1px solid #ffffff33;border-radius:16px;padding:12px 4px;text-align:center;font-size:12px;color:#fff}
+.glass{background:#ffffff22;border:1px solid #ffffff33;border-radius:16px;padding:14px 4px;text-align:center;font-size:13px;font-weight:600;color:#fff;display:flex;flex-direction:column;align-items:center;gap:8px;line-height:1.2}
 .promo{margin:16px 0;background:linear-gradient(135deg,#f0452a,#f59a0b);border-radius:26px;padding:20px;color:#fff}
 .promo h3{font-size:20px}.timer{display:flex;gap:8px;margin:12px 0}
 .timer div{background:#0003;border-radius:12px;padding:8px 12px;text-align:center;font-weight:800;font-size:22px}.timer small{display:block;font-size:10px;font-weight:400}

@@ -28,7 +28,7 @@ PAY = []
 if ALIF_PHONE:
     PAY.append({"id": "alif", "name": "Alif", "type": "phone", "value": ALIF_PHONE, "holder": ALIF_HOLDER, "cur": "TJS", "color": "#1aa053", "icon": "A"})
 elif CARD:
-    PAY.append({"id": "alif", "name": "Alif", "type": "card", "value": CARD, "holder": HOLDER, "cur": "TJS", "color": "#1aa053", "icon": "A"})
+    PAY.append({"id": "alif", "name": "Alif", "type": "phone", "value": CARD, "holder": HOLDER, "cur": "TJS", "color": "#1aa053", "icon": "A"})
 
 def _url(v):
     v = v.strip()
