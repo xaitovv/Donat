@@ -4,7 +4,7 @@ import config as C
 
 def enabled(): return bool(C.GEMINI_KEY or C.ANTHROPIC_KEY)
 
-PROMPT = ("You verify payment receipt screenshots for a game top-up shop in Tajikistan (banking apps such as DC Next / Dushanbe City, Alif, Korti Milli). "
+PROMPT = ("You verify payment receipt screenshots for a game top-up shop in Tajikistan (banking apps such as Alif, DC Next / Dushanbe City, Korti Milli). "
           "Look ONLY at the image. Reply with ONE JSON object and nothing else:\n"
           '{"is_receipt": boolean, "status": "success"|"failed"|"unknown", "amount": number or null, "currency": string or null, '
           '"date": "YYYY-MM-DD HH:MM" or null, "recipient": string or null, "sender": string or null, '

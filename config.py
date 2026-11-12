@@ -21,14 +21,14 @@ def find_item(game_id, item_id):
     return None, None
 
 RATE = float(os.getenv("RUB_RATE", "0.108"))  # 1 RUB = RATE somoni
-DC_PHONE = os.getenv("DC_PHONE", "")
-DC_HOLDER = os.getenv("DC_HOLDER", HOLDER)
-# Faqat DC Next (chek bilan). Telefon DC_PHONE da; bo'lmasa CARD_NUMBER ishlatiladi.
+ALIF_PHONE = os.getenv("ALIF_PHONE", os.getenv("DC_PHONE", ""))   # eski DC_PHONE ham ishlayveradi
+ALIF_HOLDER = os.getenv("ALIF_HOLDER", os.getenv("DC_HOLDER", HOLDER))
+# Faqat Alif (chek bilan). Telefon ALIF_PHONE da; bo'lmasa CARD_NUMBER ishlatiladi.
 PAY = []
-if DC_PHONE:
-    PAY.append({"id": "dc", "name": "DC Next", "type": "phone", "value": DC_PHONE, "holder": DC_HOLDER, "cur": "TJS", "color": "#e8590c", "icon": "DC"})
+if ALIF_PHONE:
+    PAY.append({"id": "alif", "name": "Alif", "type": "phone", "value": ALIF_PHONE, "holder": ALIF_HOLDER, "cur": "TJS", "color": "#1aa053", "icon": "A"})
 elif CARD:
-    PAY.append({"id": "dc", "name": "DC Next", "type": "card", "value": CARD, "holder": HOLDER, "cur": "TJS", "color": "#e8590c", "icon": "DC"})
+    PAY.append({"id": "alif", "name": "Alif", "type": "card", "value": CARD, "holder": HOLDER, "cur": "TJS", "color": "#1aa053", "icon": "A"})
 
 def _url(v):
     v = v.strip()
