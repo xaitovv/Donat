@@ -74,3 +74,8 @@ AI_MODEL = os.getenv("AI_MODEL", "claude-haiku-5-5").strip()
 AI_URL = os.getenv("AI_URL", "https://api.anthropic.com/v1/messages").strip()
 GEMINI_KEY = os.getenv("GEMINI_KEY", "").strip()   # bepul Gemini kaliti; qo'yilsa AI shu orqali ishlaydi (Claude kaliti o'rniga)
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-latest").strip()
+
+# --- Bajarilgan buyurtmalar kanali ---
+ORDERS_CHANNEL = os.getenv("ORDERS_CHANNEL", "").strip()     # @kanal_nomi yoki -100... (bot kanalda admin bo'lishi kerak)
+CH_FULL = os.getenv("CH_FULL", "0").strip() == "1"           # 1 = ID va Telegram ID to'liq ko'rsatiladi (standart: qisman yashiriladi)
+CH_LANG = os.getenv("CH_LANG", "tg").strip()                 # kanal posti tili: tg, ru, uz, en

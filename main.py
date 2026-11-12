@@ -220,7 +220,7 @@ async def done(c: CallbackQuery):
     oid = int(c.data[4:])
     if D.q("UPDATE orders SET status='done' WHERE id=? AND status='pending'", (oid,)).rowcount:
         o = D.q("SELECT * FROM orders WHERE id=?", (oid,)).fetchone()
-        await notify(o["uid"], "done", o)
+        await notify(o["uid"], "done", o); await post_channel(o["id"])
     await c.message.edit_reply_markup(); await c.answer("OK")
 
 @dp.callback_query(F.data.regexp(r"^rt\d+_[1-5]$"))
@@ -281,7 +281,7 @@ async def order_decide(c: CallbackQuery):
     oid = int(c.data[2:]); okay = c.data.startswith("od"); done = False
     if okay:
         if D.q("UPDATE orders SET status='done' WHERE id=? AND status='pending'", (oid,)).rowcount:
-            o = D.q("SELECT * FROM orders WHERE id=?", (oid,)).fetchone(); done = True; await notify(o["uid"], "done", o)
+            o = D.q("SELECT * FROM orders WHERE id=?", (oid,)).fetchone(); done = True; await notify(o["uid"], "done", o); await post_channel(o["id"])
     else:
         o = D.cancel_order(oid)
         if o: done = True; await tell(o["uid"], "ordrej", no=oid, amt=f"{o['price']:.2f}")
@@ -636,10 +636,54 @@ async def dx_manual(oid, reason):
     o, cap = order_row_caption(oid)
     if o and o["status"] == "pending":
         await admin_say(cap + f"\n\n⚠ <b>Avto yuborilmadi:</b> {H.escape(str(reason))}\n👉 Qo'lda bajaring yoki rad eting.", order_kb(oid))
+CH_T = {
+ "tg": dict(head="✅ <b>Фармоиш иҷро шуд!</b>", game="🎮 Бозӣ", prod="📦 Маҳсулот", pid="🆔 ID бозингар", nick="🎭 Никнейм", amt="💰 Маблағ", cur="сомонӣ", order="🏷 Фармоиш", user="👤 Корбар"),
+ "ru": dict(head="✅ <b>Заказ выполнен!</b>", game="🎮 Игра", prod="📦 Товар", pid="🆔 ID игрока", nick="🎭 Никнейм", amt="💰 Сумма", cur="сомони", order="🏷 Заказ", user="👤 Пользователь"),
+ "uz": dict(head="✅ <b>Buyurtma bajarildi!</b>", game="🎮 O'yin", prod="📦 Mahsulot", pid="🆔 O'yinchi ID", nick="🎭 Nik", amt="💰 Summa", cur="somoni", order="🏷 Buyurtma", user="👤 Foydalanuvchi"),
+ "en": dict(head="✅ <b>Order completed!</b>", game="🎮 Game", prod="📦 Product", pid="🆔 Player ID", nick="🎭 Nickname", amt="💰 Amount", cur="TJS", order="🏷 Order", user="👤 User"),
+}
+def _mask(s, keep=3):
+    s = str(s or ""); return s if len(s) <= keep * 2 else s[:keep] + "•" * (len(s) - keep * 2) + s[-keep:]
+CH_WARN = {"t": 0.0}
+def ch_target():
+    v = C.ORDERS_CHANNEL
+    return int(v) if re.fullmatch(r"-?\d+", v or "") else v
+def ch_text(o, uname):
+    """Kanalga yuboriladigan 'chek' matni. Standart holatda ID va Telegram ID qisman yashiriladi (CH_FULL=1 bo'lsa to'liq)."""
+    t = CH_T.get(C.CH_LANG, CH_T["tg"]); e = H.escape; full = C.CH_FULL
+    pid = str(o["pid"] or ""); who = str(o["uid"])
+    L = [t["head"], "━━━━━━━━━━━━━━━━━━",
+         f"{t['game']}: <b>{e(o['game'] or '')}</b>", f"{t['prod']}: <b>{e(o['item'] or o['title'] or '')}</b>",
+         f"{t['pid']}: {e(pid if full else _mask(pid))}"]
+    if o["nick"]: L.append(f"{t['nick']}: <b>{e(o['nick'])}</b>")
+    L += [f"{t['amt']}: <b>{o['price']:.2f} {t['cur']}</b>", f"{t['order']}: <b>#{o['id']}</b>",
+          f"{t['user']}: {e(str(uname or '—')[:20])} ({e(who if full else _mask(who))})"]
+    return "\n".join(L)
+async def post_channel(oid):
+    """Bajarilgan buyurtmani kanalga yuboradi (kanal sozlanmagan bo'lsa hech narsa qilmaydi)."""
+    if not C.ORDERS_CHANNEL: return
+    try:
+        o = D.q("SELECT o.*, u.name uname FROM orders o JOIN users u ON u.id=o.uid WHERE o.id=?", (oid,)).fetchone()
+        if not o: return
+        await bot.send_message(ch_target(), ch_text(o, o["uname"]), parse_mode="HTML", disable_notification=True)
+    except Exception as e:
+        logging.exception("kanalga yuborib bo'lmadi")
+        if time.time() - CH_WARN["t"] > 3600:   # adminga soatiga bir marta xabar beramiz
+            CH_WARN["t"] = time.time()
+            await admin_say(f"⚠ Buyurtma #{oid} kanalga yuborilmadi: {H.escape(str(e))[:200]}\nBot kanalda admin va «xabar yuborish» huquqiga egami? ORDERS_CHANNEL to'g'rimi?")
+@dp.message(Command("chtest"))
+async def ch_test(m: Message):
+    if m.from_user.id != C.ADMIN_ID: return
+    if not C.ORDERS_CHANNEL: return await m.answer("ORDERS_CHANNEL yozilmagan (Render → Environment).")
+    try:
+        await bot.send_message(ch_target(), "✅ Test: kanal ulandi. Bajarilgan buyurtmalar shu yerga tushadi.", disable_notification=True)
+        await m.answer("✅ Kanalga yuborildi. Ulanish to'g'ri.")
+    except Exception as e: await m.answer(f"❌ Kanalga yuborib bo'lmadi: {H.escape(str(e))[:300]}\nBotni kanalga admin qiling (xabar yuborish huquqi bilan) va ORDERS_CHANNEL ni tekshiring.", parse_mode="HTML")
+
 async def dx_done(oid):
     if D.order_finish(oid):
         o = D.q("SELECT * FROM orders WHERE id=?", (oid,)).fetchone()
-        await notify(o["uid"], "done", o)
+        await notify(o["uid"], "done", o); await post_channel(o["id"])
         await admin_say(f"✅ Buyurtma #{oid} Donatix orqali avto bajarildi.")
 async def dx_fail(oid, why):
     o = D.cancel_order(oid)   # pul mijozga qaytadi
