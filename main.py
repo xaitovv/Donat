@@ -701,6 +701,7 @@ def cfg_markup():
 def final_catalog(include_hidden=False):
     """Mini App ko'radigan katalog = Donatix/catalog.json + admin o'zgartirishlari (narx, nom, yashirish, qo'shilgan mahsulot va region)."""
     ov = {r["item_id"]: r for r in D.ov_all()}; cust = D.cust_all(); regs = D.reg_all(); gh = D.ghide_all(); out = []
+    tmv = D.tabmv_all(); tren = D.tabren_all()
     for g0 in dx_catalog():
         g = json.loads(json.dumps(g0)); gid = g["id"]; dyn = "kind" in g
         g["hidden"] = gid in gh
@@ -729,6 +730,13 @@ def final_catalog(include_hidden=False):
                   "hidden": bool(c["hidden"]) or (c["region"] in hr)}
             if it["hidden"] and not include_hidden: continue
             g["tabs"].setdefault(c["tab"] or "📦", []).append(it)
+        if not g.get("stars"):   # bo'lim nomlari va mahsulotni boshqa bo'limga ko'chirish (admin)
+            rn = {r["old"]: r["new"] for r in tren if r["game_id"] == gid}; nt = {}; g["tabmap"] = {}
+            for t0 in g["tabs"]: nt.setdefault(rn.get(t0, t0), []); g["tabmap"][t0] = rn.get(t0, t0)
+            for t0, its in g["tabs"].items():
+                for it in its:
+                    it["tab0"] = rn.get(t0, t0); nt.setdefault(tmv.get(it["id"]) or it["tab0"], []).append(it)
+            g["tabs"] = nt
         rl = list(g.get("regions") or []); tt = dict(g.get("region_titles") or {})
         for r_ in regs:
             if r_["game_id"] == gid:
@@ -746,11 +754,11 @@ def final_catalog(include_hidden=False):
 def public_catalog():
     gs = final_catalog()
     for g in gs:
-        for k in ("hidden", "hidden_regions"): g.pop(k, None)
+        for k in ("hidden", "hidden_regions", "tabmap"): g.pop(k, None)
         if g.get("stars"): g["stars"].pop("auto", None); g["stars"].pop("hidden", None)
         for items in g["tabs"].values():
             for it in items:
-                for k in ("src", "auto", "ov", "hidden", "sku"): it.pop(k, None)
+                for k in ("src", "auto", "ov", "hidden", "sku", "tab0"): it.pop(k, None)
     return gs
 def _admin(r): return r["u"]["id"] == C.ADMIN_ID
 def admin_game_view(gid):
@@ -760,13 +768,13 @@ def admin_game_view(gid):
     for tab, its in fg["tabs"].items():
         for it in its:
             items.append({"id": it["id"], "name": it["name"], "region": it.get("region") or "", "tab": tab, "price": it["price"], "auto": it.get("auto"), "ov": bool(it.get("ov")),
-                          "hidden": bool(it.get("hidden")), "src": it["src"], "sku": it.get("sku", "")})
+                          "hidden": bool(it.get("hidden")), "src": it["src"], "sku": it.get("sku", ""), "tab0": it.get("tab0", tab)})
     if fg.get("stars"):
         s = fg["stars"]; items.append({"id": s["id"], "name": "1 ⭐ (har bir star narxi)", "region": "", "tab": "⭐", "price": round(s["unit"], 4), "auto": round(s["auto"], 4),
                                        "ov": s["unit"] != s["auto"], "hidden": bool(s.get("hidden")), "src": "stars", "sku": ""})
     tt = fg.get("region_titles") or {}
     regions = [{"region": r_, "title": tt.get(r_, ""), "hidden": r_ in fg["hidden_regions"]} for r_ in (fg.get("regions") or [])]
-    return {"id": fg["id"], "name": fg["name"], "icon": fg.get("icon", ""), "color": fg.get("color", "#334"), "hidden": fg["hidden"], "regions": regions, "items": items, "stars": bool(fg.get("stars"))}
+    return {"id": fg["id"], "name": fg["name"], "icon": fg.get("icon", ""), "color": fg.get("color", "#334"), "hidden": fg["hidden"], "regions": regions, "items": items, "stars": bool(fg.get("stars")), "tabs": ([] if fg.get("stars") else list(fg["tabs"].keys()))}
 async def admin_games(r):
     if not _admin(r): return web.json_response({"error": "forbidden"}, status=403)
     games = [{"id": g["id"], "name": g["name"], "icon": g.get("icon", ""), "color": g.get("color", "#334"), "hidden": g["hidden"],
@@ -789,7 +797,7 @@ async def admin_save(r):
         mk, rt = num(st.get("markup"), 0, 300), num(st.get("usd_tjs"), 0.01, 1000)
         if mk is None or rt is None: return web.json_response({"error": "bad", "msg": "Ustama 0–300, kurs 0.01–1000 bo'lishi kerak"})
         settings = {"markup": mk, "usd_tjs": rt}
-    edits, adds, dels, regions, hide = [], [], [], [], None
+    edits, adds, dels, regions, hide, tabren = [], [], [], [], None, []
     if gid:
         view = admin_game_view(gid)
         if not view: return web.json_response({"error": "bad"})
@@ -809,6 +817,9 @@ async def admin_save(r):
                 if p is None: return web.json_response({"error": "bad", "msg": f"Narx noto'g'ri: {it['name']}"})
                 x["price"] = p
             if "hidden" in e: x["hidden"] = bool(e["hidden"])
+            if "tab" in e and it["src"] != "stars":
+                tb = str(e["tab"] or "").strip()[:24]
+                if tb and tb != it["tab"]: x["tab"] = tb; x["tab0"] = it.get("tab0")
             edits.append(x)
         for a in (d.get("adds") or [])[:100]:
             nm = str(a.get("name") or "").strip()[:60]; p = num(a.get("price"), 0.1, 100000)
@@ -821,8 +832,16 @@ async def admin_save(r):
             nm = str(rg.get("region") or "").strip()[:20]
             if not re.fullmatch(r"[\w .\-]+", nm): return web.json_response({"error": "bad", "msg": "Region nomi noto'g'ri"})
             regions.append({"region": nm, "title": str(rg.get("title") or "").strip()[:30], "hidden": int(bool(rg.get("hidden")))})
+        fgv = next((x for x in final_catalog(True) if x["id"] == gid), None) or {}
+        tmap = fgv.get("tabmap") or {}
+        for tr in (d.get("tabren") or [])[:30]:
+            fr = str(tr.get("from") or "").strip(); to = re.sub(r"[\x00-\x1f]", "", str(tr.get("to") or "")).strip()[:24]
+            if not fr or fr == to: continue
+            if not to: return web.json_response({"error": "bad", "msg": "Bo'lim nomi bo'sh bo'lmasin"})
+            ids = [i["id"] for i in view["items"] if i["tab"] == fr and i["src"] not in ("cust", "stars")]
+            tabren.append({"from": fr, "to": to, "origs": [t0 for t0, t1 in tmap.items() if t1 == fr], "ids": ids})
         if "hide_game" in d: hide = bool(d["hide_game"])
-    D.admin_apply(gid, edits, adds, dels, regions, hide, settings)
+    D.admin_apply(gid, edits, adds, dels, regions, hide, settings, tabren)
     return web.json_response({"ok": True})
 def dx_price_tjs(usd, qty=1):
     """Donatix narxi (USD) -> bizning narx (somoni): kurs va ustama (standart +30%) bilan, 0.1 ga yuqoriga yaxlitlanadi."""

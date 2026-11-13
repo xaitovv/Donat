@@ -25,6 +25,7 @@ main{padding:16px}
 .game i{aspect-ratio:1;border-radius:22px;margin-bottom:8px;font-style:normal;display:grid;place-items:center;font-size:40px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:24px;padding:18px;margin-bottom:14px}
 .lbl{color:var(--mut);font-size:12px;font-weight:700;letter-spacing:.08em;margin:6px 0 10px}
+select{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:16px;padding:13px 15px;color:var(--tx);font-size:15px;outline:0}
 input{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:16px;padding:15px;color:var(--tx);font-size:16px;outline:0}
 .btn{background:linear-gradient(135deg,var(--pr),var(--pr2));color:#fff;border:0;border-radius:18px;padding:16px;font-weight:700;font-size:16px;width:100%}
 .btn:disabled{opacity:.4}

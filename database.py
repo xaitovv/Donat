@@ -21,6 +21,8 @@ CREATE TABLE IF NOT EXISTS catover(item_id TEXT PRIMARY KEY,name TEXT,price REAL
 CREATE TABLE IF NOT EXISTS catcust(id INTEGER PRIMARY KEY AUTOINCREMENT,game_id TEXT,region TEXT,tab TEXT,name TEXT,price REAL,sku TEXT DEFAULT '',hidden INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS catregion(game_id TEXT,region TEXT,title TEXT,hidden INTEGER DEFAULT 0,PRIMARY KEY(game_id,region));
 CREATE TABLE IF NOT EXISTS gamehide(game_id TEXT PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS cattab(item_id TEXT PRIMARY KEY,tab TEXT);
+CREATE TABLE IF NOT EXISTS cattabname(game_id TEXT,old TEXT,new TEXT,PRIMARY KEY(game_id,old));
 CREATE TABLE IF NOT EXISTS fin(id INTEGER PRIMARY KEY AUTOINCREMENT,uid INTEGER,title TEXT,amount REAL,ts DATETIME DEFAULT CURRENT_TIMESTAMP);
 """)
 for _c in ("game", "item", "nick", "dx_id", "dx_fields"):
@@ -156,8 +158,10 @@ def set_get(k, default=None):
 def ov_all(): return q("SELECT * FROM catover").fetchall()
 def cust_all(): return q("SELECT * FROM catcust ORDER BY id").fetchall()
 def reg_all(): return q("SELECT * FROM catregion").fetchall()
+def tabmv_all(): return {r["item_id"]: r["tab"] for r in q("SELECT * FROM cattab").fetchall()}
+def tabren_all(): return q("SELECT * FROM cattabname").fetchall()
 def ghide_all(): return {r["game_id"] for r in q("SELECT game_id FROM gamehide").fetchall()}
-def admin_apply(gid, edits, adds, dels, regions, hide_game, settings):
+def admin_apply(gid, edits, adds, dels, regions, hide_game, settings, tabren=None):
     """Admin o'zgartirishlarini bitta tranzaksiyada saqlaydi."""
     with _l:
         db.execute("BEGIN IMMEDIATE")
@@ -169,6 +173,7 @@ def admin_apply(gid, edits, adds, dels, regions, hide_game, settings):
                     if row:
                         price = row["price"] if e.get("reset") or "price" not in e else e["price"]
                         db.execute("UPDATE catcust SET name=?, price=?, hidden=? WHERE id=?", (e.get("name") or row["name"], price, int(e["hidden"]) if "hidden" in e else row["hidden"], row["id"]))
+                        if e.get("tab"): db.execute("UPDATE catcust SET tab=? WHERE id=?", (e["tab"], row["id"]))
                 else:
                     cur = db.execute("SELECT * FROM catover WHERE item_id=?", (iid,)).fetchone()
                     name = e["name"] if "name" in e else (cur["name"] if cur else None)
@@ -176,11 +181,22 @@ def admin_apply(gid, edits, adds, dels, regions, hide_game, settings):
                     hidden = int(e["hidden"]) if "hidden" in e else (cur["hidden"] if cur else 0)
                     if name is None and price is None and not hidden: db.execute("DELETE FROM catover WHERE item_id=?", (iid,))
                     else: db.execute("INSERT OR REPLACE INTO catover(item_id,name,price,hidden) VALUES(?,?,?,?)", (iid, name, price, hidden))
+                    if e.get("tab"):   # bo'limga ko'chirish (Donatix qayta sinxronlansa ham saqlanadi)
+                        if e["tab"] == e.get("tab0"): db.execute("DELETE FROM cattab WHERE item_id=?", (iid,))
+                        else: db.execute("INSERT OR REPLACE INTO cattab(item_id,tab) VALUES(?,?)", (iid, e["tab"]))
             for a in adds: db.execute("INSERT INTO catcust(game_id,region,tab,name,price,sku,hidden) VALUES(?,?,?,?,?,?,?)", (gid, a["region"], a["tab"], a["name"], a["price"], a["sku"], a["hidden"]))
             for c in dels: db.execute("DELETE FROM catcust WHERE id=? AND game_id=?", (c, gid))
             for rg in regions: db.execute("INSERT OR REPLACE INTO catregion(game_id,region,title,hidden) VALUES(?,?,?,?)", (gid, rg["region"], rg["title"], rg["hidden"]))
             if hide_game is True: db.execute("INSERT OR IGNORE INTO gamehide(game_id) VALUES(?)", (gid,))
             elif hide_game is False: db.execute("DELETE FROM gamehide WHERE game_id=?", (gid,))
+            for tr in (tabren or []):   # bo'lim nomini o'zgartirish
+                new = tr["to"]
+                for t0 in tr["origs"]:
+                    if t0 == new: db.execute("DELETE FROM cattabname WHERE game_id=? AND old=?", (gid, t0))
+                    else: db.execute("INSERT OR REPLACE INTO cattabname(game_id,old,new) VALUES(?,?,?)", (gid, t0, new))
+                for iid in tr["ids"]:
+                    db.execute("UPDATE cattab SET tab=? WHERE item_id=? AND tab=?", (new, iid, tr["from"]))
+                db.execute("UPDATE catcust SET tab=? WHERE game_id=? AND tab=?", (new, gid, tr["from"]))
             for k, v in settings.items(): db.execute("INSERT OR REPLACE INTO settings(k,v) VALUES(?,?)", (k, str(v)))
             db.execute("COMMIT")
         except Exception:

@@ -21,7 +21,7 @@ function render(){
   $("#nav").innerHTML=NAV.map(([k,i,n])=>`<a class="${v==k||(k=="menu"&&sub)||(k=="friends"&&v=="top")||(k=="set"&&(v=="adm"||v=="admg"))?"on":""}" onclick="go('${k}')">${I(i)}<span>${t(n)}</span></a>`).join("");
   if(tg)tg.BackButton[(sub||v=="top")?"show":"hide"]()}
 tg?.BackButton.onClick(()=>go(({top:"friends",admg:"adm",adm:"set"})[S.view]||"menu"));
-const gi=g=>`<img class="gimg" src="/${g.id}.png?v=5" onerror="this.style.display='none'">`;
+const gi=g=>`<img class="gimg" src="/${g.id}.png?v=6" onerror="this.style.display='none'">`;
 function menu(){const u=S.u,tgu=tg?.initDataUnsafe?.user||{};
   const games=S.cat.games.map(g=>`<div class="game" onclick="openGame('${g.id}')"><i style="background:${g.color}">${gi(g)}${g.icon}</i>${g.name}</div>`).join("");
   const gifts=(S.cat.gifts||[]).map(g=>`<div class="li"><div><b>${g.name}</b><br><small style="color:var(--mut)">${g.sub}</small></div>›</div>`).join("");
@@ -172,7 +172,7 @@ function adm(){const A=S.adm||{games:[],settings:{}};
   <div class="lbl">O'YINLAR</div>${A.games.map((g,i)=>`<div class="card" style="display:flex;align-items:center;gap:12px;padding:14px 16px;${g.hidden?"opacity:.55":""}" onclick="admGame(${i})"><div class="av" style="background:${esc(g.color)};border-radius:14px">${esc(g.icon)}</div><div style="flex:1;min-width:0"><b>${esc(g.name)}</b><br><small style="color:var(--mut)">${g.count} ta mahsulot${g.hidden?" · yashirin":""}</small></div><span style="color:var(--mut)">›</span></div>`).join("")}`}
 async function admSaveSet(){const r=await api("/api/admin/save",{game:"",settings:{markup:+$("#a_mk").value,usd_tjs:+$("#a_rt").value}});if(r&&r.ok){toast("Saqlandi");S.cat=(await api("/api/catalog"))||S.cat;admOpen()}else alert((r&&r.msg)||t("err"))}
 async function admLoad(id,keep){const r=await api("/api/admin/game?id="+encodeURIComponent(id));if(!(r&&r.ok&&r.game))return alert(t("err"));
-  S.ad={...r.game,ed:{},adds:[],dels:[],rg:{},newRegs:[],cur:keep===undefined?null:keep,hide:r.game.hidden};go("admg")}
+  S.ad={...r.game,ed:{},adds:[],dels:[],rg:{},newRegs:[],newTabs:[],cur:keep===undefined?null:keep,hide:r.game.hidden};go("admg")}
 function admGame(i){admLoad(S.adm.games[i].id)}
 const admRegs=()=>{const a=S.ad,m=new Map();a.regions.forEach(x=>m.set(x.region,{...x}));a.newRegs.forEach(x=>m.set(x.region,{...x,fresh:1}));Object.entries(a.rg).forEach(([k,v])=>{if(m.has(k))Object.assign(m.get(k),v)});return [...m.values()]};
 const admRows=()=>{const a=S.ad;const base=a.items.filter(x=>!a.dels.includes(x.id)).map(x=>({...x,...(a.ed[x.id]||{})}));const add=a.adds.map((x,i)=>({...x,id:"new"+i,src:"new",auto:null,ov:false}));return [...base,...add].filter(x=>a.cur===null||x.region==a.cur)};
@@ -186,6 +186,13 @@ function admRegE(k,v){const a=S.ad,nr=a.newRegs.find(x=>x.region==a.cur);if(nr){
 function admRegHide(){const r=admRegs().find(x=>x.region==S.ad.cur);if(!r)return;admRegE("hidden",!r.hidden);render()}
 function admAdd(){const n=$("#a_n").value.trim().slice(0,60),p=+$("#a_p").value;if(!n||!(p>=0.1))return alert("Nom va narxni kiriting (narx kamida 0.1)");
   S.ad.adds.push({name:n,price:p,region:S.ad.cur||"",tab:($("#a_t").value.trim().slice(0,20))||"📦",sku:$("#a_s").value.trim().slice(0,60),hidden:false});render()}
+const admTabs=()=>{const a=S.ad,s=new Set(a.tabs||[]);(a.newTabs||[]).forEach(x=>s.add(x));return [...s]};
+function admTabAdd(){const v=$("#a_nt").value.trim().slice(0,24);if(!v)return;if(!admTabs().includes(v))S.ad.newTabs.push(v);render()}
+async function admTabRen(i){const a=S.ad,fr=admTabs()[i],to=($("#a_tn"+i).value||"").trim().slice(0,24);if(!to||to==fr)return;
+  const nt=a.newTabs.indexOf(fr);if(nt>=0){a.newTabs[nt]=to;return render()}
+  if(admDirty())return alert("Avval o'zgarishlarni pastdagi «Saqlash» bilan saqlang, keyin guruh nomini o'zgartiring");
+  const r=await api("/api/admin/save",{game:a.id,tabren:[{from:fr,to}]});
+  if(r&&r.ok){toast("Saqlandi ✓");S.cat=(await api("/api/catalog"))||S.cat;admLoad(a.id,a.cur)}else alert((r&&r.msg)||t("err"))}
 const admDirty=()=>{const a=S.ad;return a&&(Object.keys(a.ed).length||a.adds.length||a.dels.length||Object.keys(a.rg).length||a.newRegs.length||a.hide!==a.hidden)};
 function admg(){const a=S.ad;if(!a)return"";const rs=admRegs(),cr=rs.find(x=>x.region==a.cur),rows=admRows();
   const chips=`<div class="reg chips" style="margin:0 0 12px"><a class="${a.cur===null?"on":""}" onclick="admCur(-1)">Hammasi</a>${rs.map((r,i)=>`<a class="${a.cur===r.region?"on":""}" onclick="admCur(${i})" style="${r.hidden?"opacity:.5":""}">${esc(r.title||r.region)}</a>`).join("")}</div>`;
@@ -193,12 +200,14 @@ function admg(){const a=S.ad;if(!a)return"";const rs=admRegs(),cr=rs.find(x=>x.r
   const list=rows.map(x=>{const id=esc(x.id),del=(x.src=="cust"||x.src=="new");
     return `<div class="card" style="padding:14px 16px;${x.hidden?"opacity:.55":""}"><div class="flex" style="align-items:center;gap:8px;margin-bottom:10px"><input value="${esc(x.name)}" oninput="admE('${id}','name',this.value)" ${x.src=="stars"?"disabled":""} style="flex:1"><div class="sw ${x.hidden?"off":""}" onclick="admT('${id}')"></div></div>
     <div class="flex" style="align-items:center;gap:10px"><input type="number" step="0.01" value="${x.price}" oninput="admE('${id}','price',this.value)" style="flex:1"><small style="color:var(--mut);width:90px;text-align:center">${esc(x.region||"hamma")}</small>${del?`<a onclick="admD('${id}')" style="color:var(--bad);font-size:20px">🗑</a>`:""}</div>
+    ${x.src=="stars"?"":`<select onchange="admE('${id}','tab',this.value)" style="margin-top:10px">${(admTabs().includes(x.tab)?admTabs():[...admTabs(),x.tab]).map(tn=>`<option value="${esc(tn)}" ${tn==x.tab?"selected":""}>${esc(tn)}</option>`).join("")}</select>`}
     <small style="color:var(--mut);display:block;margin-top:8px">${{dx:"Donatix",static:"oddiy",cust:"qo'lda",new:"yangi (saqlanmagan)",stars:"Donatix"}[x.src]||""}${x.auto!=null?` · avto narx: ${x.auto}${x.ov||(a.ed[x.id]&&a.ed[x.id].price!==undefined&&a.ed[x.id].price!=x.auto)?` · <a onclick="admReset('${id}')" style="color:#8b7bff">avtoga qaytarish</a>`:""}`:""}${x.sku?` · kod: ${esc(x.sku)}`:""}</small></div>`}).join("");
   return `<div class="flex" style="align-items:center;gap:14px;margin:6px 0 16px"><div class="av" style="background:var(--card);border:1px solid var(--line);color:var(--tx);width:48px;height:48px" onclick="go('adm')">${I("back",22)}</div><h1 style="font-size:23px;flex:1">${esc(a.name)}</h1><div class="sw ${a.hide?"off":""}" onclick="S.ad.hide=!S.ad.hide;render()" title="O'yinni ko'rsatish"></div></div>
   ${a.hide?`<div class="card" style="color:var(--bad)">Bu o'yin mijozlarga ko'rinmaydi</div>`:""}${chips}${regCard}
   <div class="card"><div class="lbl">YANGI REGION</div><div class="flex"><input id="a_nr" placeholder="masalan: CIS, Global, Tojikiston" style="flex:1"><button class="btn" style="width:auto;padding:0 18px" onclick="admRegAdd()">＋</button></div></div>
+  ${a.stars?"":`<div class="card"><div class="lbl">GURUHLAR</div>${admTabs().map((tn,i)=>`<div class="flex" style="gap:8px;margin-bottom:8px"><input id="a_tn${i}" value="${esc(tn)}" style="flex:1"><button class="btn" style="width:auto;padding:0 16px;background:var(--card2)" onclick="admTabRen(${i})">✓</button></div>`).join("")}<div class="flex" style="gap:8px;margin-top:4px"><input id="a_nt" placeholder="Yangi guruh nomi" style="flex:1"><button class="btn" style="width:auto;padding:0 18px" onclick="admTabAdd()">＋</button></div><small style="color:var(--mut);display:block;margin-top:8px">Nomni o'zgartirib ✓ bosing. Mahsulotni guruhga o'tkazish: mahsulot kartasidagi ro'yxatdan guruhni tanlab, «Saqlash» bosing.</small></div>`}
   <div class="lbl">MAHSULOTLAR (${rows.length})</div>${list||`<p style="color:var(--mut)">Bu yerda mahsulot yo'q.</p>`}
-  <div class="card"><div class="lbl">YANGI MAHSULOT ${a.cur?"("+esc(a.cur)+")":""}</div><input id="a_n" placeholder="Nomi (masalan: 100 Diamonds)" style="margin-bottom:10px"><div class="flex" style="margin-bottom:10px"><input id="a_p" type="number" step="0.01" placeholder="Narx (somoni)" style="flex:1"><input id="a_t" placeholder="Bo'lim (💎)" style="flex:1"></div><input id="a_s" placeholder="Donatix mahsulot kodi (ixtiyoriy, avto yetkazish uchun)" style="margin-bottom:10px"><button class="btn" style="background:var(--card2)" onclick="admAdd()">＋ Mahsulot qo'shish</button></div>
+  <div class="card"><div class="lbl">YANGI MAHSULOT ${a.cur?"("+esc(a.cur)+")":""}</div><input id="a_n" placeholder="Nomi (masalan: 100 Diamonds)" style="margin-bottom:10px"><div class="flex" style="margin-bottom:10px"><input id="a_p" type="number" step="0.01" placeholder="Narx (somoni)" style="flex:1"><input id="a_t" list="a_tl" placeholder="Guruh (💎)" style="flex:1"><datalist id="a_tl">${admTabs().map(tn=>`<option value="${esc(tn)}">`).join("")}</datalist></div><input id="a_s" placeholder="Donatix mahsulot kodi (ixtiyoriy, avto yetkazish uchun)" style="margin-bottom:10px"><button class="btn" style="background:var(--card2)" onclick="admAdd()">＋ Mahsulot qo'shish</button></div>
   <div class="buy"><button class="btn" id="a_save" onclick="admSave()">Saqlash${admDirty()?" ●":""}</button></div>`}
 async function admSave(){const a=S.ad,b=$("#a_save");if(b)b.disabled=true;
   const edits=Object.entries(a.ed).map(([id,e])=>({id,...e}));
