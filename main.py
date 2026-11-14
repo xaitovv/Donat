@@ -1406,21 +1406,44 @@ async def receipt_api(r):
         tk = asyncio.create_task(rcpt_ai_task(tid, sent.message_id, cap.replace("\n\n🤖 AI tekshirmoqda...", ""), kb, raw, a, x["value"])); TASKS.add(tk); tk.add_done_callback(TASKS.discard)
     await tell(uid, "rcv", no=tid, amt=f"{a:g}", method=f"{x['name']} ({T[lang_of(uid)]['kind_' + x['type']]})")
     return web.json_response({"ok": True})
+
+# ---------- MIJOZ PROFIL RASMI ----------
+AVMAP = {}; AV_DIR = "/tmp/diavex-av"
+def av_tok(uid):
+    """Telegram ID ni ko'rsatmaydigan yopiq havola (token -> uid xotirada saqlanadi)."""
+    t = hmac.new(C.BOT_TOKEN.encode(), f"av{uid}".encode(), hashlib.sha256).hexdigest()[:16]
+    AVMAP[t] = uid; return "/av/" + t
+async def avatar(r):
+    uid = AVMAP.get(r.match_info["t"])
+    if not uid: return web.Response(status=404)
+    path = os.path.join(AV_DIR, str(uid))
+    if not (os.path.exists(path) and time.time() - os.path.getmtime(path) < 6 * 3600):
+        data = b""
+        try:
+            ph = await bot.get_user_profile_photos(uid, limit=1)
+            if ph.total_count and ph.photos:
+                import io
+                buf = io.BytesIO(); sz = ph.photos[0]; await bot.download(sz[min(1, len(sz) - 1)].file_id, destination=buf); data = buf.getvalue()
+        except Exception: logging.warning("avatar %s: olib bo'lmadi", uid)
+        os.makedirs(AV_DIR, exist_ok=True); open(path, "wb").write(data)
+    data = open(path, "rb").read()
+    if not data: return web.Response(status=404)
+    return web.Response(body=data, content_type="image/jpeg", headers={"Cache-Control": "public, max-age=3600"})
 async def reviews(r):
-    rows = D.q("SELECT r.oid, r.stars, r.text, r.reply, r.ts, o.game, o.item, o.title, u.name FROM ratings r JOIN orders o ON o.id=r.oid JOIN users u ON u.id=r.uid ORDER BY r.oid DESC LIMIT 300").fetchall()
+    rows = D.q("SELECT r.oid, r.stars, r.text, r.reply, r.ts, o.game, o.item, o.title, u.name, u.id uid FROM ratings r JOIN orders o ON o.id=r.oid JOIN users u ON u.id=r.uid ORDER BY r.oid DESC LIMIT 300").fetchall()
     dt = lambda s: f"{s[8:10]}.{s[5:7]}.{s[:4]}" if s else ""
-    items = [{"id": x["oid"], "name": (x["name"] or "?")[:20], "stars": x["stars"], "game": x["game"] or "", "item": x["item"] or x["title"], "text": x["text"] or "", "reply": x["reply"] or "", "date": dt(x["ts"])} for x in rows]
+    items = [{"id": x["oid"], "name": (x["name"] or "?")[:20], "stars": x["stars"], "game": x["game"] or "", "item": x["item"] or x["title"], "text": x["text"] or "", "reply": x["reply"] or "", "date": dt(x["ts"]), "av": av_tok(x["uid"])} for x in rows]
     return web.json_response({**rstats(), "items": items})
 async def top_api(r):
     kind = r.query.get("kind", "donors"); cut = {"week": "-7 days", "month": "-30 days"}.get(r.query.get("period", "week"))
     a = (cut,) if cut else ()
     if kind == "topups":
         w = "AND f.ts >= datetime('now', ?)" if cut else ""
-        rows = D.q(f"SELECT u.name, SUM(f.amount) s FROM fin f JOIN users u ON u.id=f.uid WHERE f.title='Top up' {w} GROUP BY f.uid ORDER BY s DESC LIMIT 20", a)
+        rows = D.q(f"SELECT u.id uid, u.name, SUM(f.amount) s FROM fin f JOIN users u ON u.id=f.uid WHERE f.title='Top up' {w} GROUP BY f.uid ORDER BY s DESC LIMIT 20", a)
     else:
         w = "AND o.ts >= datetime('now', ?)" if cut else ""
-        rows = D.q(f"SELECT u.name, SUM(o.price) s FROM orders o JOIN users u ON u.id=o.uid WHERE o.status!='cancelled' {w} GROUP BY o.uid ORDER BY s DESC LIMIT 20", a)
-    return web.json_response({"items": [{"name": (x["name"] or "?")[:20], "total": round(x["s"] or 0, 2)} for x in rows]})
+        rows = D.q(f"SELECT u.id uid, u.name, SUM(o.price) s FROM orders o JOIN users u ON u.id=o.uid WHERE o.status!='cancelled' {w} GROUP BY o.uid ORDER BY s DESC LIMIT 20", a)
+    return web.json_response({"items": [{"name": (x["name"] or "?")[:20], "total": round(x["s"] or 0, 2), "av": av_tok(x["uid"])} for x in rows]})
 async def history(r):
     uid = r["u"]["id"]; f = lambda x: (lambda s: f"{s[8:10]}.{s[5:7]}.{s[:4]} {s[11:16]}" if len(s) >= 16 else s)(str(x or ""))
     o = [{"id": x["id"], "title": x["title"], "price": x["price"], "status": x["status"], "date": f(x["ts"]), "game": x["game"] or "", "item": x["item"] or ""} for x in D.q("SELECT * FROM orders WHERE uid=? ORDER BY id DESC LIMIT 50", (uid,))]
@@ -1470,7 +1493,7 @@ async def main():
     for g in C.DX_GAMES:
         if g["id"] not in _have:
             app.router.add_get("/" + g["id"] + ".png", _img(os.path.join(HERE, g["id"] + ".png")))
-    app.router.add_get("/ico/{g}", ico)
+    app.router.add_get("/ico/{g}", ico); app.router.add_get("/av/{t}", avatar)
     for x in C.PAY:
         app.router.add_get("/" + x["id"] + ".png", _img(os.path.join(HERE, x["id"] + ".png")))
     run = web.AppRunner(app); await run.setup(); await web.TCPSite(run, "0.0.0.0", C.PORT).start()
