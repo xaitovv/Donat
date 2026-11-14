@@ -1018,7 +1018,7 @@ def img_of(d, depth=0):
         if isinstance(v, dict): v = v.get("url") or v.get("src") or ""
         if not isinstance(v, str) or not v.strip() or v.startswith("data:"): return ""
         v = v.strip()
-        return urljoin(base, v) if (v.startswith(("http", "/")) and (re.search(r"\.(png|jpe?g|webp|gif|svg)(\?|$)", v, re.I) or "/" in v)) else ""
+        return urljoin(base, v) if v.startswith(("http", "/")) else urljoin(base, "/" + v)
     names = ("image", "image_url", "img", "icon", "icon_url", "logo", "logo_url", "picture", "thumbnail", "thumb", "cover", "photo", "category_image", "category_icon", "category_logo", "game_image", "game_icon")
     for k in names:
         u = url(d.get(k))
@@ -1051,8 +1051,8 @@ async def dx_icons():
         if u: D.icon_set(a["game_id"], u); ok += 1
     sample = ""
     if not ok:
-        sample = "product keys: " + ", ".join(list(prods[0].keys())[:25]) if prods else ""
-        if cats: sample += "\ncategory keys: " + ", ".join(list(cats[0].keys())[:25])
+        sample = "product image_url: " + repr([p.get("image_url") for p in prods[:3]]) if prods else ""
+        if cats: sample += "\ncategory image_url: " + repr([c.get("image_url") for c in cats[:3]])
     return ok, tot, sample
 def _dl_icon(url, path):
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; DiavexBot/1.0)", "Accept": "image/*"})
