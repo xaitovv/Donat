@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS catcust(id INTEGER PRIMARY KEY AUTOINCREMENT,game_id 
 CREATE TABLE IF NOT EXISTS catregion(game_id TEXT,region TEXT,title TEXT,hidden INTEGER DEFAULT 0,PRIMARY KEY(game_id,region));
 CREATE TABLE IF NOT EXISTS gamehide(game_id TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS cattab(item_id TEXT PRIMARY KEY,tab TEXT);
+CREATE TABLE IF NOT EXISTS autogames(game_id TEXT PRIMARY KEY,name TEXT,cats TEXT,banned INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS cattabname(game_id TEXT,old TEXT,new TEXT,PRIMARY KEY(game_id,old));
 CREATE TABLE IF NOT EXISTS fin(id INTEGER PRIMARY KEY AUTOINCREMENT,uid INTEGER,title TEXT,amount REAL,ts DATETIME DEFAULT CURRENT_TIMESTAMP);
 """)
@@ -158,6 +159,15 @@ def set_get(k, default=None):
 def ov_all(): return q("SELECT * FROM catover").fetchall()
 def cust_all(): return q("SELECT * FROM catcust ORDER BY id").fetchall()
 def reg_all(): return q("SELECT * FROM catregion").fetchall()
+def auto_all(banned=False):
+    rows = q("SELECT * FROM autogames").fetchall()
+    return rows if banned else [r for r in rows if not r["banned"]]
+def auto_get(gid): return q("SELECT * FROM autogames WHERE game_id=? AND banned=0", (gid,)).fetchone()
+def auto_set(gid, name, cats):
+    import json as _j
+    q("INSERT INTO autogames(game_id,name,cats) VALUES(?,?,?) ON CONFLICT(game_id) DO UPDATE SET name=excluded.name, cats=excluded.cats", (gid, name, _j.dumps(cats)))
+def auto_ban(gid):
+    q("UPDATE autogames SET banned=1 WHERE game_id=?", (gid,)); q("UPDATE dxcat SET active=0 WHERE game_id=?", (gid,))
 def tabmv_all(): return {r["item_id"]: r["tab"] for r in q("SELECT * FROM cattab").fetchall()}
 def tabren_all(): return q("SELECT * FROM cattabname").fetchall()
 def ghide_all(): return {r["game_id"] for r in q("SELECT game_id FROM gamehide").fetchall()}

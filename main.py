@@ -409,12 +409,24 @@ async def dx_sync_cmd(m: Message, command: CommandObject):
         else: lines.append(f"❌ <b>{H.escape(gid)}</b>: {H.escape(str(v))}")
     await say_chunks(m, lines + ["", f"Ustama: +{cfg_markup() * 100:g}% · kurs: {cfg_rate():g}", "Topilmaganlar uchun: /dxcats so'z va /dxcat o'yin_id kategoriya"])
 
+@dp.message(Command("dximport"))
+async def dx_import_cmd(m: Message):
+    if m.from_user.id != C.ADMIN_ID or not DX.enabled(): return
+    await m.answer("🔄 Donatix'dagi barcha o'yinlar olinyapti (1-2 daqiqa ketishi mumkin)...")
+    try: rep = await dx_import(True)
+    except Exception as e:
+        logging.exception("dximport"); return await m.answer(f"❌ xato: {e}")
+    if "_" in rep: return await m.answer(rep["_"])
+    await m.answer(f"✅ Yangi o'yinlar: {rep['new']} · yangilandi: {rep['upd']} · mahsulotlar: {rep['rows']} ta"
+                   + (f"\n🗑 Avval o'chirilgan (o'tkazib yuborildi): {rep['skip']}" if rep["skip"] else "")
+                   + "\n\nKerak bo'lmaganlarini Mini App → admin panel → o'yin → «O'chirish» bilan olib tashlang.")
+
 @dp.message(Command("dxcat"))
 async def dx_cat_set(m: Message, command: CommandObject):
     if m.from_user.id != C.ADMIN_ID: return
     a = (command.args or "").split()
-    if len(a) != 2 or not any(x["id"] == a[0] for x in C.DX_GAMES):
-        return await m.answer("Ishlatish: /dxcat o'yin_id kategoriya_id\nO'yinlar: " + ", ".join(x["id"] for x in C.DX_GAMES))
+    if len(a) != 2 or not any(x["id"] == a[0] for x in all_games()):
+        return await m.answer("Ishlatish: /dxcat o'yin_id kategoriya_id\nO'yinlar: " + ", ".join(x["id"] for x in all_games()))
     D.dxgame_set(a[0], a[1], a[1]); await m.answer(f"✅ {a[0]} → {a[1]}. Endi /dxsync {a[0]} yozing.")
 
 @dp.message(Command("dxraw"))
@@ -563,7 +575,7 @@ async def checkid(r):
     except Exception: raw = None
     if raw is None and q.get("id"): raw = {"player_id": q.get("id")}
     if _rl(chk_hits, r["u"]["id"], 10): return web.json_response({"error": "rate"}, status=429)
-    gm = next((x for x in C.DX_GAMES if x["id"] == gid), None)
+    gm = next((x for x in all_games() if x["id"] == gid), None)
     if gm and D.dxcat_items(gid):   # Donatix'dan olingan o'yin
         row = D.dxcat_any(gid, region)
         if not row: return web.json_response({"error": "bad"})
@@ -774,7 +786,7 @@ def admin_game_view(gid):
                                        "ov": s["unit"] != s["auto"], "hidden": bool(s.get("hidden")), "src": "stars", "sku": ""})
     tt = fg.get("region_titles") or {}
     regions = [{"region": r_, "title": tt.get(r_, ""), "hidden": r_ in fg["hidden_regions"]} for r_ in (fg.get("regions") or [])]
-    return {"id": fg["id"], "name": fg["name"], "icon": fg.get("icon", ""), "color": fg.get("color", "#334"), "hidden": fg["hidden"], "regions": regions, "items": items, "stars": bool(fg.get("stars")), "tabs": ([] if fg.get("stars") else list(fg["tabs"].keys()))}
+    return {"id": fg["id"], "name": fg["name"], "icon": fg.get("icon", ""), "color": fg.get("color", "#334"), "hidden": fg["hidden"], "regions": regions, "items": items, "stars": bool(fg.get("stars")), "auto": bool(D.auto_get(gid)), "tabs": ([] if fg.get("stars") else list(fg["tabs"].keys()))}
 async def admin_games(r):
     if not _admin(r): return web.json_response({"error": "forbidden"}, status=403)
     games = [{"id": g["id"], "name": g["name"], "icon": g.get("icon", ""), "color": g.get("color", "#334"), "hidden": g["hidden"],
@@ -787,6 +799,9 @@ async def admin_game_api(r):
 async def admin_save(r):
     if not _admin(r): return web.json_response({"error": "forbidden"}, status=403)
     d = await r.json(); gid = str(d.get("game") or "")
+    if gid and d.get("del_game"):   # o'yinni o'chirish (Donatix'dan qo'shilgan bo'lsa butunlay, asosiy bo'lsa yashiriladi)
+        if D.auto_get(gid): D.auto_ban(gid); return web.json_response({"ok": True, "deleted": True})
+        D.admin_apply(gid, [], [], [], [], True, {}); return web.json_response({"ok": True, "deleted": False})
     def num(x, lo, hi):
         try: v = float(x)
         except Exception: return None
@@ -866,6 +881,71 @@ def tab_for(name, emo, kind):
         unit = re.sub(r"[^\w\s+.\-]", "", mm.group(1), flags=re.UNICODE).strip()[:14]
         return f"{emo or '💎'} {unit}".strip()
     return "📑 Pass"
+PALETTE = ["#2563eb", "#7c3aed", "#db2777", "#ea580c", "#0f766e", "#4f46e5", "#b45309", "#0e7490"]
+def all_games():
+    """config.py dagi o'yinlar + /dximport bilan Donatix'dan qo'shilganlar."""
+    base = list(C.DX_GAMES); ids = {g["id"] for g in base}; out = []
+    for a in D.auto_all():
+        if a["game_id"] in ids: continue
+        out.append({"id": a["game_id"], "name": a["name"], "sub": "", "icon": "🎮", "color": PALETTE[sum(map(ord, a["game_id"])) % len(PALETTE)], "kind": "topup", "cat": "", "q": "", "auto": True})
+    return base + sorted(out, key=lambda g: g["name"].lower())
+def dx_rows(gm, prods, kind="topup"):
+    """Donatix mahsulotlari -> dxcat qatorlari (region aniqlash bilan). (rows, manba)"""
+    regs = [p_region(p) for p in prods]; src = "region" if any(regs) else ""
+    if not any(regs):
+        cats = [str(p.get("category_id") or "") for p in prods]
+        if len(set(cats)) > 1:
+            pre = os.path.commonprefix(cats)
+            regs = [(c[len(pre):].strip("_- ") or str(p.get("category_name") or "")).upper() for c, p in zip(cats, prods)]; src = "kategoriya"
+    if not any(regs):
+        nm = [re.search(r"[\(\[]([^\)\]]{2,20})[\)\]]\s*$", str(p.get("name") or "")) for p in prods]
+        if sum(1 for x in nm if x) * 2 >= len(prods) and any(nm): regs = [x.group(1).upper() if x else "" for x in nm]; src = "nom"
+    best = {}
+    for p, rg in zip(prods, regs):
+        try: usd = float(p.get("price_usd") or 0)
+        except Exception: usd = 0
+        if usd <= 0: continue
+        name = str(p.get("name") or p.get("title") or p["product_id"]); emo = p.get("emoji") or ""
+        shown = name if (not emo or emo in name) else f"{name} {emo}"
+        title = str(p.get("region_title") or rg)
+        row = (p["product_id"], gm["id"], rg, title, shown, tab_for(name, emo, kind), emo, usd,
+               json.dumps(p.get("fields") or [], ensure_ascii=False), kind, _qty(name), int(p.get("min_quantity") or 0), int(p.get("max_quantity") or 0))
+        k = (rg, shown)
+        if k not in best or usd < best[k][7]: best[k] = row
+    return list(best.values()), src
+async def dx_import(create=True):
+    """Donatix'dagi BARCHA top-up o'yinlarni oladi (config.py dagilardan tashqari). create=False: faqat mavjudlarini yangilaydi."""
+    import collections
+    if not cfg_rate(): return {"_": "USD_TJS yozilmagan (Render → Environment)"}
+    prods = await DX.products(kind="topup", pages=40)
+    cfgs = []
+    for gm in C.DX_GAMES:
+        if gm["kind"].startswith("telegram"): continue
+        cf = D.dxgame_get(gm["id"]); cfgs.append((gm, (cf["cat"] if cf else "") or gm.get("cat", "")))
+    prods = [p for p in prods if p.get("product_id") and p.get("category_id") and not any(dx_match(p, gm, cat, "") for gm, cat in cfgs)]
+    if not prods: return {"new": 0, "upd": 0, "rows": 0, "skip": 0}
+    base = lambda c: re.sub(r"_(?:[a-z]{2,3}|global|cis|latam|mena|sea|row)$", "", c)
+    cnt = collections.Counter(base(str(p["category_id"])) for p in {str(p["category_id"]): p for p in prods}.values())
+    groups = {}
+    for p in prods:
+        c = str(p["category_id"]); groups.setdefault(base(c) if cnt[base(c)] > 1 else c, []).append(p)
+    old = {a["game_id"]: a for a in D.auto_all(True)}; rep = {"new": 0, "upd": 0, "rows": 0, "skip": 0}
+    for key, ps in groups.items():
+        gid = "g_" + (re.sub(r"[^a-z0-9_]", "", key.lower())[:30] or hashlib.md5(key.encode()).hexdigest()[:8])
+        if gid in old and old[gid]["banned"]: rep["skip"] += 1; continue
+        if gid not in old and not create: continue
+        names = [re.sub(r"\s*[\(\[][^\)\]]{1,25}[\)\]]\s*$", "", str(p.get("category_name") or "")).strip() for p in ps]
+        cn = collections.Counter(n for n in names if n)
+        name = cn.most_common(1)[0][0] if cn else key
+        if len(cn) > 1:
+            pre = os.path.commonprefix(list(cn)).strip(" -_(")
+            if len(pre) >= 3: name = pre
+        rows, _src = dx_rows({"id": gid}, ps)
+        if not rows: continue
+        D.auto_set(gid, name, sorted({str(p["category_id"]) for p in ps}))
+        D.dxcat_replace(gid, rows)
+        rep["upd" if gid in old else "new"] += 1; rep["rows"] += len(rows)
+    return rep
 async def dx_sync(only=None):
     """Donatix'dan o'yinlar va paketlarni oladi (miqdorlari Donatix'dagidek, region bo'yicha). {o'yin_id: (soni, regionlar, namuna, manba) | xato matni}"""
     rep = {}
@@ -920,7 +1000,7 @@ async def dx_sync(only=None):
 def dx_catalog():
     """Mini App uchun o'yinlar: Donatix'dan sinxronlanganlar (bo'lsa), qolganlari catalog.json dan."""
     dyn = {}
-    for gm in C.DX_GAMES:
+    for gm in all_games():
         rows = D.dxcat_items(gm["id"])
         if not rows or not cfg_rate(): continue
         kind = gm["kind"]; tg = kind.startswith("telegram")
@@ -941,9 +1021,9 @@ def dx_catalog():
             regs.sort(key=lambda x: (0 if x.upper() == "CIS" else 1 if x.upper() == "GLOBAL" else 2, x))
             if regs: g["regions"] = regs; g["region_titles"] = {r["region"]: r["region_title"] for r in rows if r["region"]}
         dyn[gm["id"]] = g
-    return [dyn[x["id"]] for x in C.DX_GAMES if x["id"] in dyn] + [x for x in C.CATALOG["games"] if x["id"] not in dyn]
+    return [dyn[x["id"]] for x in all_games() if x["id"] in dyn] + [x for x in C.CATALOG["games"] if x["id"] not in dyn]
 def dx_find(gid, iid):
-    gm = next((x for x in C.DX_GAMES if x["id"] == gid), None); r = D.dxcat_get(str(iid or ""))
+    gm = next((x for x in all_games() if x["id"] == gid), None); r = D.dxcat_get(str(iid or ""))
     return (gm, r) if gm and r and r["game_id"] == gid and cfg_rate() else None
 def parse_fields(raw, keys):
     """Mijoz yuborgan maydonlarni tekshiradi (faqat ruxsat etilgan kalitlar, qisqa matn)."""
@@ -1015,7 +1095,9 @@ async def dx_worker():
                 await dx_poll_once()
                 if time.time() - last_sync > 1800:   # katalog va narxlar har 30 daqiqada yangilanadi
                     last_sync = time.time()
-                    for gid in D.dxcat_game_ids(): await dx_sync(gid)
+                    for gid in D.dxcat_game_ids():
+                        if not gid.startswith("g_"): await dx_sync(gid)
+                    await dx_import(create=False)
                 if time.time() - last_bal > 600:
                     last_bal = time.time(); b = await DX.balance()
                     if b is not None and b < C.DX_MIN_BALANCE and time.time() - warned > 6 * 3600:
