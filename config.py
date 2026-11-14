@@ -98,3 +98,6 @@ def _channels():
         out.append({"id": chat, "url": url, "name": title or (cid if cid.startswith("@") else f"Kanal {len(out) + 1}")})
     return out
 REQ_CHANNELS = _channels()
+
+# «Buyurtmalar» tugmasi ochadigan kanal: ORDERS_URL bo'lmasa ORDERS_CHANNEL (@kanal) dan olinadi
+ORDERS_URL = _url(os.getenv("ORDERS_URL", "")) or (_url(ORDERS_CHANNEL) if ORDERS_CHANNEL.startswith("@") else "")

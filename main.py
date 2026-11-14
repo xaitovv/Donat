@@ -64,7 +64,8 @@ def _kb(w):
     if ok: rows.append([InlineKeyboardButton(text=w["shop"], web_app=WebAppInfo(url=url))])
     r = []
     if C.LESSONS_URL.startswith("http"): r.append(InlineKeyboardButton(text=w["les"], url=C.LESSONS_URL))
-    if ok: r.append(InlineKeyboardButton(text=w["ord"], web_app=WebAppInfo(url=url.rstrip("/") + "/?go=hist")))
+    if C.ORDERS_URL.startswith("http"): r.append(InlineKeyboardButton(text=w["ord"], url=C.ORDERS_URL))
+    elif ok: r.append(InlineKeyboardButton(text=w["ord"], web_app=WebAppInfo(url=url.rstrip("/") + "/?go=hist")))
     if r: rows.append(r)
     if C.CHANNEL_URL.startswith("http"): rows.append([InlineKeyboardButton(text=w["chan"], url=C.CHANNEL_URL)])
     r = [InlineKeyboardButton(text=w["lang"], callback_data="chlang")]
