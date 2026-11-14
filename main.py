@@ -1003,7 +1003,81 @@ async def dx_import(create=True):
         D.auto_set(gid, name, sorted({str(p["category_id"]) for p in ps}))
         D.dxcat_replace(gid, rows)
         rep["upd" if gid in old else "new"] += 1; rep["rows"] += len(rows)
+    try: await dx_icons()
+    except Exception: logging.exception("dx_icons")
     return rep
+
+# ---------- O'YIN IKONKALARI (Donatix'dan avtomatik) ----------
+from urllib.parse import urljoin
+ICO_DIR = "/tmp/diavex-icons"
+def img_of(d, depth=0):
+    """Donatix javobidagi (mahsulot/kategoriya) rasm havolasini topadi."""
+    if not isinstance(d, dict): return ""
+    base = C.DONATIX_URL.split("/api")[0] + "/"
+    def url(v):
+        if isinstance(v, dict): v = v.get("url") or v.get("src") or ""
+        if not isinstance(v, str) or not v.strip() or v.startswith("data:"): return ""
+        v = v.strip()
+        return urljoin(base, v) if (v.startswith(("http", "/")) and (re.search(r"\.(png|jpe?g|webp|gif|svg)(\?|$)", v, re.I) or "/" in v)) else ""
+    names = ("image", "image_url", "img", "icon", "icon_url", "logo", "logo_url", "picture", "thumbnail", "thumb", "cover", "photo", "category_image", "category_icon", "category_logo", "game_image", "game_icon")
+    for k in names:
+        u = url(d.get(k))
+        if u: return u
+    for k, v in d.items():
+        if re.search(r"img|image|icon|logo|pic|thumb|cover", str(k), re.I):
+            u = url(v)
+            if u: return u
+    if depth < 1:
+        for k in ("category", "game"):
+            u = img_of(d.get(k), depth + 1)
+            if u: return u
+    return ""
+async def dx_icons():
+    """Donatix'dagi o'yinlar rasmlarini topib, har bir avto-o'yinga bog'laydi. (bog'landi, jami, namuna kalitlari)"""
+    prods = await DX.products(kind="topup", pages=40); cats = await DX.categories()
+    by = {}
+    for c in cats:
+        u = img_of(c); cid = str(c.get("category_id") or c.get("id") or "")
+        if u and cid: by[cid] = u
+    for p in prods:
+        u = img_of(p); cid = str(p.get("category_id") or "")
+        if u and cid and cid not in by: by[cid] = u
+    ok = tot = 0
+    for a in D.auto_all():
+        tot += 1
+        try: cl = json.loads(a["cats"] or "[]")
+        except Exception: cl = []
+        u = next((by[c] for c in cl if c in by), "")
+        if u: D.icon_set(a["game_id"], u); ok += 1
+    sample = ""
+    if not ok:
+        sample = "product keys: " + ", ".join(list(prods[0].keys())[:25]) if prods else ""
+        if cats: sample += "\ncategory keys: " + ", ".join(list(cats[0].keys())[:25])
+    return ok, tot, sample
+def _dl_icon(url, path):
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; DiavexBot/1.0)", "Accept": "image/*"})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        data = r.read(2_000_001); ct = r.headers.get("Content-Type", "image/png").split(";")[0]
+    if len(data) > 2_000_000 or not ct.startswith("image/"): raise ValueError("rasm emas")
+    os.makedirs(ICO_DIR, exist_ok=True)
+    open(path, "wb").write(data); open(path + ".ct", "w").write(ct)
+async def ico(r):
+    gid = re.sub(r"[^a-z0-9_]", "", r.match_info["g"].lower()); u = D.icon_get(gid)
+    if not u or not u.startswith("https://"): return web.Response(status=404)
+    path = os.path.join(ICO_DIR, gid)
+    if not os.path.exists(path):
+        try: await asyncio.to_thread(_dl_icon, u, path)
+        except Exception: logging.warning("icon %s: yuklab bo'lmadi", gid); return web.Response(status=404)
+    ct = open(path + ".ct").read() if os.path.exists(path + ".ct") else "image/png"
+    return web.Response(body=open(path, "rb").read(), content_type=ct, headers={"Cache-Control": "public, max-age=604800"})
+@dp.message(Command("dxicons"))
+async def dx_icons_cmd(m: Message):
+    if m.from_user.id != C.ADMIN_ID or not DX.enabled(): return
+    await m.answer("🖼 Ikonkalar olinyapti...")
+    ok, tot, sample = await dx_icons()
+    for f in os.listdir(ICO_DIR) if os.path.isdir(ICO_DIR) else []: os.remove(os.path.join(ICO_DIR, f))   # eski keshni tozalaydi
+    await m.answer(f"✅ Rasm bog'landi: {ok} / {tot}" + (f"\n⚠ Donatix javobida rasm havolasi topilmadi.\n<code>{H.escape(sample)}</code>\nShu xabarni menga yuboring." if not ok else ""), parse_mode="HTML")
+
 async def dx_sync(only=None):
     """Donatix'dan o'yinlar va paketlarni oladi (miqdorlari Donatix'dagidek, region bo'yicha). {o'yin_id: (soni, regionlar, namuna, manba) | xato matni}"""
     rep = {}
@@ -1367,6 +1441,7 @@ async def main():
     for g in C.DX_GAMES:
         if g["id"] not in _have:
             app.router.add_get("/" + g["id"] + ".png", _img(os.path.join(HERE, g["id"] + ".png")))
+    app.router.add_get("/ico/{g}", ico)
     for x in C.PAY:
         app.router.add_get("/" + x["id"] + ".png", _img(os.path.join(HERE, x["id"] + ".png")))
     run = web.AppRunner(app); await run.setup(); await web.TCPSite(run, "0.0.0.0", C.PORT).start()

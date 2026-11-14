@@ -29,7 +29,8 @@ function render(){
   if(tg)tg.BackButton[(sub||v=="top")?"show":"hide"]()}
 tg?.BackButton.onClick(()=>go(({top:"friends",admg:"adm",adm:"set"})[S.view]||"menu"));
 const bdg=g=>g.dx?'<b class="bdg a">AUTO</b>':g.new?'<b class="bdg n">NEW</b>':"";
-const gi=g=>`<img class="gimg" src="/${g.id}.png?v=6" onerror="this.style.display='none'">`;
+const iu=id=>String(id).startsWith("g_")?`/ico/${id}`:`/${id}.png?v=6`;
+const gi=g=>`<img class="gimg" src="${iu(g.id)}" onerror="this.style.display='none'">`;
 function menu(){const u=S.u,tgu=tg?.initDataUnsafe?.user||{};
   const games=S.cat.games.map(g=>`<div class="game" onclick="openGame('${g.id}')"><i style="background:${g.color}">${gi(g)}${g.icon}${bdg(g)}</i>${g.name}</div>`).join("");
   const gifts=(S.cat.gifts||[]).map(g=>`<div class="li"><div><b>${g.name}</b><br><small style="color:var(--mut)">${g.sub}</small></div>›</div>`).join("");
@@ -91,7 +92,7 @@ async function buy(){const g=S.game,bt=document.querySelector(".buy .btn");if(bt
   if(r?.error=="funds"){if(bt)bt.disabled=false;return fundsModal(r.need,r.balance)}
   if(r?.ok){S.u.balance=r.balance;const rows=`<div class="lbl" style="text-align:center">${t("product_l")}</div><b style="font-size:19px">${esc(r.game)} · ${esc(r.item)}</b><div style="color:var(--mut);margin-top:6px">${r.nick?"«"+esc(r.nick)+"» · ":""}${esc(Object.values(S.fv).join(" / "))}</div><div style="color:#8b7bff;font-weight:700;margin-top:6px">${fmt(r.price)} ${t("cur")}</div>`;showRes({head:t("res_wait")+" ⏳",title:t("ord_title"),body:t("ord_body"),rows})}else{if(bt)bt.disabled=false;alert(t("err"))}}
 const CPY='<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#8b7bff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle;margin-left:6px"><rect x="9" y="9" width="12" height="12" rx="2.5"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg>';
-const pi=id=>`<img class="gimg" src="/${id}.png?v=8" onerror="this.style.display='none'">`;
+const pi=id=>`<img class="gimg" src="${iu(id)}" onerror="this.style.display='none'">`;
 function modal(title,body,btn,cb,icon,bg){const o=document.createElement("div");o.style.cssText="position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:30;display:flex;align-items:center;justify-content:center;padding:20px";
  const ic=icon||'<svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#22c993" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
  o.innerHTML=`<div style="background:var(--card);border:1px solid var(--line);border-radius:34px;padding:42px 28px 28px;width:100%;max-width:460px;text-align:center"><div style="width:124px;height:124px;border-radius:50%;background:${bg||"#22c99322"};display:grid;place-items:center;margin:0 auto 26px">${ic}</div><h2 style="font-size:28px;line-height:1.2;margin-bottom:14px">${title}</h2><p style="color:var(--mut);font-size:18px;line-height:1.5;margin-bottom:30px">${body}</p><button class="btn" style="padding:20px;font-size:19px">${btn}</button></div>`;

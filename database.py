@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS cattab(item_id TEXT PRIMARY KEY,tab TEXT);
 CREATE TABLE IF NOT EXISTS gameinfo(game_id TEXT,pos INTEGER,img BLOB,txt TEXT,ver INTEGER,PRIMARY KEY(game_id,pos));
 CREATE TABLE IF NOT EXISTS autogames(game_id TEXT PRIMARY KEY,name TEXT,cats TEXT,banned INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS cattabname(game_id TEXT,old TEXT,new TEXT,PRIMARY KEY(game_id,old));
+CREATE TABLE IF NOT EXISTS gameicon(game_id TEXT PRIMARY KEY,url TEXT);
 CREATE TABLE IF NOT EXISTS fin(id INTEGER PRIMARY KEY AUTOINCREMENT,uid INTEGER,title TEXT,amount REAL,ts DATETIME DEFAULT CURRENT_TIMESTAMP);
 """)
 for _c in ("game", "item", "nick", "dx_id", "dx_fields"):
@@ -227,3 +228,8 @@ def admin_apply(gid, edits, adds, dels, regions, hide_game, settings, tabren=Non
             db.execute("COMMIT")
         except Exception:
             db.execute("ROLLBACK"); raise
+
+def icon_set(gid, url): q("INSERT INTO gameicon(game_id,url) VALUES(?,?) ON CONFLICT(game_id) DO UPDATE SET url=excluded.url", (gid, url))
+def icon_get(gid):
+    r = q("SELECT url FROM gameicon WHERE game_id=?", (gid,)).fetchone()
+    return r["url"] if r else None
