@@ -1013,7 +1013,7 @@ ICO_DIR = "/tmp/diavex-icons"
 def img_of(d, depth=0):
     """Donatix javobidagi (mahsulot/kategoriya) rasm havolasini topadi."""
     if not isinstance(d, dict): return ""
-    base = C.DONATIX_URL.split("/api")[0] + "/"
+    base = C.ICON_BASE.rstrip("/") + "/"
     def url(v):
         if isinstance(v, dict): v = v.get("url") or v.get("src") or ""
         if not isinstance(v, str) or not v.strip() or v.startswith("data:"): return ""
@@ -1048,11 +1048,14 @@ async def dx_icons():
         try: cl = json.loads(a["cats"] or "[]")
         except Exception: cl = []
         u = next((by[c] for c in cl if c in by), "")
+        if not u and C.ICON_TPL and cl: u = C.ICON_TPL.replace("{cat}", str(cl[0])).replace("{game}", a["game_id"])
         if u: D.icon_set(a["game_id"], u); ok += 1
     sample = ""
     if not ok:
         npi = sum(1 for p in prods if p.get("image_url")); nci = sum(1 for c in cats if c.get("image_url"))
         sample = f"image_url bor: mahsulot {npi}/{len(prods)}, kategoriya {nci}/{len(cats)}"
+        ex = [(p.get("category_id"), p.get("image_url")) for p in prods if p.get("image_url")][:3]
+        sample += "\nrasmli namunalar: " + repr(ex)
         if cats: sample += "\nkategoriya: " + json.dumps({k: (v if k != "products" else "...") for k, v in cats[0].items()}, ensure_ascii=False)[:500]
         if prods:
             st, d = await DX.call("GET", "/products/" + urllib.parse.quote(str(prods[0]["product_id"])))
@@ -1067,13 +1070,35 @@ def _dl_icon(url, path):
     open(path, "wb").write(data); open(path + ".ct", "w").write(ct)
 async def ico(r):
     gid = re.sub(r"[^a-z0-9_]", "", r.match_info["g"].lower()); u = D.icon_get(gid)
-    if not u or not u.startswith("https://"): return web.Response(status=404)
+    nz = lambda s: re.sub(r"[^a-z0-9]", "", str(s).lower())
+    gm = next((x for x in all_games() if x["id"] == gid), None)
+    want = {nz(gid), nz(gid[2:] if gid.startswith("g_") else gid)} | ({nz(gm["name"])} if gm else set())
+    loc = next((os.path.join(HERE, f) for f in os.listdir(HERE) if f.lower().endswith(".png") and nz(f[:-4]) in want), None)   # o'yin nomi.png yoki id.png
+    if loc: return web.FileResponse(loc, headers={"Cache-Control": "public, max-age=3600"})
     path = os.path.join(ICO_DIR, gid)
+    if not u or not u.startswith("https://"): return web.Response(status=404)
     if not os.path.exists(path):
         try: await asyncio.to_thread(_dl_icon, u, path)
         except Exception: logging.warning("icon %s: yuklab bo'lmadi", gid); return web.Response(status=404)
     ct = open(path + ".ct").read() if os.path.exists(path + ".ct") else "image/png"
     return web.Response(body=open(path, "rb").read(), content_type=ct, headers={"Cache-Control": "public, max-age=604800"})
+@dp.message(Command("dxids"))
+async def dx_ids(m: Message, command: CommandObject):
+    if m.from_user.id != C.ADMIN_ID: return
+    f = (command.args or "").strip().lower()
+    rows = [f"<code>{H.escape(g['id'])}</code> — {H.escape(g['name'])}" for g in all_games() if not f or f in g["name"].lower() or f in g["id"]]
+    if not rows: return await m.answer("Topilmadi. Ishlatish: /dxids call of duty")
+    await say_chunks(m, rows[:60])
+@dp.message(Command("dxico"))
+async def dx_ico_set(m: Message, command: CommandObject):
+    if m.from_user.id != C.ADMIN_ID: return
+    a = (command.args or "").split()
+    if len(a) != 2 or not a[1].startswith("https://") or not any(x["id"] == a[0] for x in all_games()):
+        return await m.answer("Ishlatish: /dxico o'yin_id https://rasm-havolasi.png")
+    D.icon_set(a[0], a[1]); p = os.path.join(ICO_DIR, a[0])
+    for f in (p, p + ".ct"):
+        if os.path.exists(f): os.remove(f)
+    await m.answer(f"✅ {a[0]} uchun rasm saqlandi.")
 @dp.message(Command("dxicons"))
 async def dx_icons_cmd(m: Message):
     if m.from_user.id != C.ADMIN_ID or not DX.enabled(): return
