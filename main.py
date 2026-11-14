@@ -1275,6 +1275,7 @@ async def order(r):
     stars = bool(fg.get("stars")) and fg["stars"]["id"] == iid
     it = None if stars else next((i for items in fg["tabs"].values() for i in items if i["id"] == iid), None)
     if not stars and not it: return web.json_response({"error": "bad"})
+    if fg.get("clan") and d.get("ack") is not True: return web.json_response({"error": "bad"})   # klan xizmati: mijoz shartlarga rozi bo'lishi shart
     src = "stars" if stars else it["src"]
     nick = ""; qty = 1; fj = ""; sku = None
     if src in ("dx", "stars"):   # Donatix'dan olingan mahsulot

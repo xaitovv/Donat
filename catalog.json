@@ -191,7 +191,42 @@
    "color": "#7c3aed",
    "new": true,
    "infoblocks": true,
-   "tabs": {}
+   "tabs": {
+    "Glory": [
+     {
+      "id": "gb0",
+      "name": "Glory",
+      "price": 20
+     }
+    ]
+   },
+   "clan": true,
+   "regions": [
+    "BD",
+    "EU",
+    "ID",
+    "ME",
+    "NA",
+    "PK",
+    "SG",
+    "SAC",
+    "TH",
+    "US",
+    "VN"
+   ],
+   "region_titles": {
+    "BD": "🇧🇩 Bangladesh",
+    "EU": "🇪🇺 Europe",
+    "ID": "🇮🇩 Indonesia",
+    "ME": "🌍 Middle East",
+    "NA": "🇺🇸 North America",
+    "PK": "🇵🇰 Pakistan",
+    "SG": "🇸🇬 Singapore",
+    "SAC": "🌎 South America - Spanish (SAC)",
+    "TH": "🇹🇭 Thailand",
+    "US": "🇺🇸 United States (US)",
+    "VN": "🇻🇳 Vietnam"
+   }
   }
  ],
  "gifts": [
