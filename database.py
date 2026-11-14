@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS catcust(id INTEGER PRIMARY KEY AUTOINCREMENT,game_id 
 CREATE TABLE IF NOT EXISTS catregion(game_id TEXT,region TEXT,title TEXT,hidden INTEGER DEFAULT 0,PRIMARY KEY(game_id,region));
 CREATE TABLE IF NOT EXISTS gamehide(game_id TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS cattab(item_id TEXT PRIMARY KEY,tab TEXT);
+CREATE TABLE IF NOT EXISTS gameinfo(game_id TEXT,pos INTEGER,img BLOB,txt TEXT,ver INTEGER,PRIMARY KEY(game_id,pos));
 CREATE TABLE IF NOT EXISTS autogames(game_id TEXT PRIMARY KEY,name TEXT,cats TEXT,banned INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS cattabname(game_id TEXT,old TEXT,new TEXT,PRIMARY KEY(game_id,old));
 CREATE TABLE IF NOT EXISTS fin(id INTEGER PRIMARY KEY AUTOINCREMENT,uid INTEGER,title TEXT,amount REAL,ts DATETIME DEFAULT CURRENT_TIMESTAMP);
@@ -159,6 +160,21 @@ def set_get(k, default=None):
 def ov_all(): return q("SELECT * FROM catover").fetchall()
 def cust_all(): return q("SELECT * FROM catcust ORDER BY id").fetchall()
 def reg_all(): return q("SELECT * FROM catregion").fetchall()
+def info_get(gid): return q("SELECT pos,txt,ver,(img IS NOT NULL) AS has FROM gameinfo WHERE game_id=? ORDER BY pos", (gid,)).fetchall()
+def info_img(gid, pos):
+    r = q("SELECT img,ver FROM gameinfo WHERE game_id=? AND pos=?", (gid, pos)).fetchone()
+    return (r["img"], r["ver"]) if r else None
+def info_set(gid, blocks):
+    import time as _t
+    ver = int(_t.time() * 1000)
+    with _l:
+        db.execute("BEGIN IMMEDIATE")
+        try:
+            db.execute("DELETE FROM gameinfo WHERE game_id=?", (gid,))
+            for i, (txt, img) in enumerate(blocks): db.execute("INSERT INTO gameinfo(game_id,pos,img,txt,ver) VALUES(?,?,?,?,?)", (gid, i, img, txt, ver))
+            db.execute("COMMIT")
+        except Exception:
+            db.execute("ROLLBACK"); raise
 def auto_all(banned=False):
     rows = q("SELECT * FROM autogames").fetchall()
     return rows if banned else [r for r in rows if not r["banned"]]

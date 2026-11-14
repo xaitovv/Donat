@@ -63,8 +63,6 @@ _DXG = [
  {"id": "mlbb", "name": "MOBILE LEGENDS", "sub": "Diamonds", "icon": "⚔️", "color": "#7c3aed", "kind": "topup", "cat": "mobile_legends", "q": "mobile legends"},
  {"id": "coc", "name": "CLASH OF CLANS", "sub": "Gems", "icon": "🏰", "color": "#b45309", "kind": "topup", "cat": "clash_of_clans", "q": "clash of clans"},
  {"id": "fcmobile", "name": "EA SPORTS FC MOBILE", "sub": "FC Points", "icon": "⚽", "color": "#0f766e", "kind": "topup", "cat": "eafc_mobile", "q": "eafc mobile"},
- {"id": "efootball", "name": "EFOOTBALL", "sub": "Coins", "icon": "⚽", "color": "#4f46e5", "kind": "topup", "cat": "efootball", "q": "football"},
- {"id": "guildbot", "name": "БОТ ДЛЯ ГИЛЬДИИ", "sub": "Guild Bot", "icon": "🛡", "color": "#7c3aed", "kind": "topup", "cat": "", "q": "гильд"},
  {"id": "tgpremium", "name": "TELEGRAM PREMIUM", "sub": "3 · 6 · 12", "icon": "💎", "color": "#2563eb", "kind": "telegram_premium"},
  {"id": "tgstars", "name": "TELEGRAM STARS", "sub": "Stars", "icon": "⭐", "color": "#f59e0b", "kind": "telegram_stars"},
 ]

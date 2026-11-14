@@ -434,6 +434,7 @@ async def dx_raw(m: Message, command: CommandObject):
     if m.from_user.id != C.ADMIN_ID or not DX.enabled(): return
     p = (command.args or "").strip().lstrip("/")
     if not p or ".." in p: return await m.answer("Ishlatish: /dxraw glory/regions")
+    p = urllib.parse.quote(p, safe="/?&=:,._-%+")   # kirill harflar ham ishlasin (q=клан)
     st, d = await DX.call("GET", "/" + p)
     await m.answer(H.escape(f"HTTP {st}\n" + json.dumps(d, ensure_ascii=False)[:3500]), parse_mode="HTML")
 
@@ -716,7 +717,7 @@ def final_catalog(include_hidden=False):
     tmv = D.tabmv_all(); tren = D.tabren_all()
     for g0 in dx_catalog():
         g = json.loads(json.dumps(g0)); gid = g["id"]; dyn = "kind" in g
-        g["hidden"] = gid in gh
+        g["hidden"] = gid in gh; g["dx"] = dyn   # dx: Donatix orqali avto bajariladi (AUTO belgisi)
         if g["hidden"] and not include_hidden: continue
         hr = {r["region"] for r in regs if r["game_id"] == gid and r["hidden"]}
         if g.get("stars"):
@@ -763,11 +764,13 @@ def final_catalog(include_hidden=False):
         if not include_hidden: g["tabs"] = {k: v for k, v in g["tabs"].items() if v} or ({"⭐": []} if g.get("stars") else {})
         out.append(g)
     return out
+def info_list(gid): return [{"img": (f"/gi/{gid}/{b['pos']}?v={b['ver']}" if b["has"] else ""), "txt": b["txt"] or ""} for b in D.info_get(gid)]
 def public_catalog():
     gs = final_catalog()
     for g in gs:
         for k in ("hidden", "hidden_regions", "tabmap"): g.pop(k, None)
         if g.get("stars"): g["stars"].pop("auto", None); g["stars"].pop("hidden", None)
+        if g.get("infoblocks"): g["info"] = info_list(g["id"])
         for items in g["tabs"].values():
             for it in items:
                 for k in ("src", "auto", "ov", "hidden", "sku", "tab0"): it.pop(k, None)
@@ -786,7 +789,7 @@ def admin_game_view(gid):
                                        "ov": s["unit"] != s["auto"], "hidden": bool(s.get("hidden")), "src": "stars", "sku": ""})
     tt = fg.get("region_titles") or {}
     regions = [{"region": r_, "title": tt.get(r_, ""), "hidden": r_ in fg["hidden_regions"]} for r_ in (fg.get("regions") or [])]
-    return {"id": fg["id"], "name": fg["name"], "icon": fg.get("icon", ""), "color": fg.get("color", "#334"), "hidden": fg["hidden"], "regions": regions, "items": items, "stars": bool(fg.get("stars")), "auto": bool(D.auto_get(gid)), "tabs": ([] if fg.get("stars") else list(fg["tabs"].keys()))}
+    return {"id": fg["id"], "name": fg["name"], "icon": fg.get("icon", ""), "color": fg.get("color", "#334"), "hidden": fg["hidden"], "regions": regions, "items": items, "stars": bool(fg.get("stars")), "auto": bool(D.auto_get(gid)), "infoblocks": bool(fg.get("infoblocks")), "info": (info_list(gid) if fg.get("infoblocks") else []), "tabs": ([] if fg.get("stars") else list(fg["tabs"].keys()))}
 async def admin_games(r):
     if not _admin(r): return web.json_response({"error": "forbidden"}, status=403)
     games = [{"id": g["id"], "name": g["name"], "icon": g.get("icon", ""), "color": g.get("color", "#334"), "hidden": g["hidden"],
@@ -1021,7 +1024,9 @@ def dx_catalog():
             regs.sort(key=lambda x: (0 if x.upper() == "CIS" else 1 if x.upper() == "GLOBAL" else 2, x))
             if regs: g["regions"] = regs; g["region_titles"] = {r["region"]: r["region_title"] for r in rows if r["region"]}
         dyn[gm["id"]] = g
-    return [dyn[x["id"]] for x in all_games() if x["id"] in dyn] + [x for x in C.CATALOG["games"] if x["id"] not in dyn]
+    cfg_ids = {x["id"] for x in C.DX_GAMES}
+    return ([dyn[x["id"]] for x in all_games() if x["id"] in dyn and x["id"] in cfg_ids] + [x for x in C.CATALOG["games"] if x["id"] not in dyn]
+            + [dyn[x["id"]] for x in all_games() if x["id"] in dyn and x["id"] not in cfg_ids])
 def dx_find(gid, iid):
     gm = next((x for x in all_games() if x["id"] == gid), None); r = D.dxcat_get(str(iid or ""))
     return (gm, r) if gm and r and r["game_id"] == gid and cfg_rate() else None
@@ -1264,6 +1269,31 @@ async def history(r):
     n = [{"title": x["title"], "amount": x["amount"], "date": f(x["ts"])} for x in D.q("SELECT * FROM fin WHERE uid=? ORDER BY id DESC LIMIT 50", (uid,))]
     return web.json_response({"orders": o, "fin": n})
 
+async def admin_info_save(r):
+    if not _admin(r): return web.json_response({"error": "forbidden"}, status=403)
+    d = await r.json(); gid = str(d.get("game") or "")
+    if not any(x["id"] == gid and x.get("infoblocks") for x in C.CATALOG["games"]): return web.json_response({"error": "bad", "msg": "Bu o'yinda rasm/tavsif yo'q"})
+    old = {b["pos"]: D.info_img(gid, b["pos"]) for b in D.info_get(gid)}; out = []
+    for b in (d.get("blocks") or [])[:8]:
+        txt = str(b.get("txt") or "")[:2000].strip(); img = str(b.get("img") or ""); blob = None
+        if img.startswith("data:image/"):
+            try: raw = base64.b64decode(img.split(",", 1)[1])
+            except Exception: raw = b""
+            if not raw or len(raw) > 1_500_000 or not (raw[:3] == b"\xff\xd8\xff" or raw[:4] == b"\x89PNG" or raw[:4] == b"RIFF"):
+                return web.json_response({"error": "bad", "msg": "Rasm noto'g'ri yoki juda katta"})
+            blob = raw
+        elif img.startswith("keep:"):
+            try: blob = (old.get(int(img[5:])) or (None,))[0]
+            except Exception: blob = None
+        if blob or txt: out.append((txt, blob))
+    D.info_set(gid, out)
+    return web.json_response({"ok": True})
+async def info_img(r):
+    try: row = D.info_img(r.match_info["g"], int(r.match_info["p"]))
+    except Exception: return web.Response(status=404)
+    if not row or not row[0]: return web.Response(status=404)
+    b = row[0]; ct = "image/jpeg" if b[:3] == b"\xff\xd8\xff" else "image/png" if b[:4] == b"\x89PNG" else "image/webp"
+    return web.Response(body=b, content_type=ct, headers={"Cache-Control": "public, max-age=31536000, immutable"})
 def _img(path):
     async def h(r):
         return web.FileResponse(path) if os.path.exists(path) else web.Response(status=404)
@@ -1272,7 +1302,7 @@ async def main():
     app = web.Application(middlewares=[mw], client_max_size=8 * 1024 * 1024)
     app.on_response_prepare.append(_sec)
     app.add_routes([web.get("/api/catalog", catalog), web.get("/api/me", me), web.post("/api/lang", lang), web.post("/api/order", order),
-                    web.post("/api/topup", topup), web.post("/api/receipt", receipt_api), web.get("/api/history", history), web.get("/api/top", top_api), web.get("/api/checkid", checkid), web.get("/api/admin/games", admin_games), web.get("/api/admin/game", admin_game_api), web.post("/api/admin/save", admin_save), web.get("/api/reviews", reviews), web.route("OPTIONS", "/{p:.*}", lambda r: web.Response()),
+                    web.post("/api/topup", topup), web.post("/api/receipt", receipt_api), web.get("/api/history", history), web.get("/api/top", top_api), web.get("/api/checkid", checkid), web.get("/api/admin/games", admin_games), web.get("/api/admin/game", admin_game_api), web.post("/api/admin/save", admin_save), web.post("/api/admin/info", admin_info_save), web.get("/gi/{g}/{p}", info_img), web.get("/api/reviews", reviews), web.route("OPTIONS", "/{p:.*}", lambda r: web.Response()),
                     web.get("/", lambda r: web.FileResponse(os.path.join(HERE, "index.html")))])
     for f in ("style.css", "app.js", "i18n.js", "ru.json", "uz.json", "tg.json", "en.json", "logo.png", "splash.jpg"):
         app.router.add_get("/" + f, lambda r, f=f: web.FileResponse(os.path.join(HERE, f)))

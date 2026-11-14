@@ -21,9 +21,10 @@ function render(){
   $("#nav").innerHTML=NAV.map(([k,i,n])=>`<a class="${v==k||(k=="menu"&&sub)||(k=="friends"&&v=="top")||(k=="set"&&(v=="adm"||v=="admg"))?"on":""}" onclick="go('${k}')">${I(i)}<span>${t(n)}</span></a>`).join("");
   if(tg)tg.BackButton[(sub||v=="top")?"show":"hide"]()}
 tg?.BackButton.onClick(()=>go(({top:"friends",admg:"adm",adm:"set"})[S.view]||"menu"));
+const bdg=g=>g.dx?'<b class="bdg a">AUTO</b>':g.new?'<b class="bdg n">NEW</b>':"";
 const gi=g=>`<img class="gimg" src="/${g.id}.png?v=6" onerror="this.style.display='none'">`;
 function menu(){const u=S.u,tgu=tg?.initDataUnsafe?.user||{};
-  const games=S.cat.games.map(g=>`<div class="game" onclick="openGame('${g.id}')"><i style="background:${g.color}">${gi(g)}${g.icon}</i>${g.name}</div>`).join("");
+  const games=S.cat.games.map(g=>`<div class="game" onclick="openGame('${g.id}')"><i style="background:${g.color}">${gi(g)}${g.icon}${bdg(g)}</i>${g.name}</div>`).join("");
   const gifts=(S.cat.gifts||[]).map(g=>`<div class="li"><div><b>${g.name}</b><br><small style="color:var(--mut)">${g.sub}</small></div>›</div>`).join("");
   const ai=(S.cat.ai||[]).map(g=>`<div class="pk"><b>${g.name}</b><span>${g.price} c.</span></div>`).join("");
   const body=S.tab=="games"?`<div class="grid3">${games}</div>`:S.tab=="gift"?`<div class="card">${gifts}</div>`:`<div class="grid3" style="grid-template-columns:1fr 1fr">${ai}</div>`;
@@ -53,8 +54,9 @@ function game(){const g=S.game;if(!g)return"";
   const grid=g.stars?"":`<div class="lbl">${t("pick")}</div>${tb}<div class="grid3" style="grid-template-columns:1fr 1fr">${items.map(i=>`<div class="pk ${S.sel==i.id?"on":""}" onclick="S.sel='${esc(i.id)}';render()">${i.off?`<em>-${i.off}%</em>`:""}<b>${esc(i.name)}</b><span>${fmt(i.price)} ${t("cur")}</span></div>`).join("")}</div>`;
   const can=S.checked&&(g.stars?qtyOk(g):!!S.sel);
   return `<div class="card top" style="margin:0 0 14px"><div class="av" style="background:${g.color};border-radius:14px;position:relative">${gi(g)}${g.icon}</div><div><b>${g.name}</b><br><small style="color:var(--mut)">${g.sub}</small></div></div>
-  <div class="card"><div class="lbl">${g.nocheck?"TELEGRAM":t("playerid")}</div>${idcard}</div>${rc}${sc}${grid}
-  <div class="buy"><button class="btn" id="bbtn" ${can?"":"disabled"} onclick="buy()">${t("choose")}</button></div>`}
+  ${(g.info||[]).map(b=>`<div class="card">${b.img?`<img src="${esc(b.img)}" style="width:100%;border-radius:14px;display:block">`:""}${b.txt?`<div style="${b.img?"margin-top:12px;":""}white-space:pre-wrap;line-height:1.5;font-size:15px">${esc(b.txt)}</div>`:""}</div>`).join("")}
+  ${(!g.stars&&!Object.keys(g.tabs).length)?`<div class="card" style="color:var(--mut);text-align:center">${t("soon")}</div>`:`<div class="card"><div class="lbl">${g.nocheck?"TELEGRAM":t("playerid")}</div>${idcard}</div>${rc}${sc}${grid}
+  <div class="buy"><button class="btn" id="bbtn" ${can?"":"disabled"} onclick="buy()">${t("choose")}</button></div>`}`}
 async function chk(){const g=S.game,fs=gfields(g);S.idmsg="";
   for(const f of fs){const v=(S.fv[f.key]||"").trim();S.fv[f.key]=v;const ok=f.key=="telegram_username"?/^@?[A-Za-z0-9_]{5,32}$/.test(v):/^[#@\w.\-]{1,40}$/.test(v);if(!ok){S.idmsg="fmt";return render()}}
   S.pid=S.fv[fs[0].key];
@@ -172,7 +174,7 @@ function adm(){const A=S.adm||{games:[],settings:{}};
   <div class="lbl">O'YINLAR</div>${A.games.map((g,i)=>`<div class="card" style="display:flex;align-items:center;gap:12px;padding:14px 16px;${g.hidden?"opacity:.55":""}" onclick="admGame(${i})"><div class="av" style="background:${esc(g.color)};border-radius:14px">${esc(g.icon)}</div><div style="flex:1;min-width:0"><b>${esc(g.name)}</b><br><small style="color:var(--mut)">${g.count} ta mahsulot${g.hidden?" · yashirin":""}</small></div><span style="color:var(--mut)">›</span></div>`).join("")}`}
 async function admSaveSet(){const r=await api("/api/admin/save",{game:"",settings:{markup:+$("#a_mk").value,usd_tjs:+$("#a_rt").value}});if(r&&r.ok){toast("Saqlandi");S.cat=(await api("/api/catalog"))||S.cat;admOpen()}else alert((r&&r.msg)||t("err"))}
 async function admLoad(id,keep){const r=await api("/api/admin/game?id="+encodeURIComponent(id));if(!(r&&r.ok&&r.game))return alert(t("err"));
-  S.ad={...r.game,ed:{},adds:[],dels:[],rg:{},newRegs:[],newTabs:[],cur:keep===undefined?null:keep,hide:r.game.hidden};go("admg")}
+  S.ad={...r.game,ed:{},adds:[],dels:[],rg:{},newRegs:[],newTabs:[],info:(r.game.info||[]).map(x=>({img:x.img||"",txt:x.txt||""})),cur:keep===undefined?null:keep,hide:r.game.hidden};go("admg")}
 function admGame(i){admLoad(S.adm.games[i].id)}
 const admRegs=()=>{const a=S.ad,m=new Map();a.regions.forEach(x=>m.set(x.region,{...x}));a.newRegs.forEach(x=>m.set(x.region,{...x,fresh:1}));Object.entries(a.rg).forEach(([k,v])=>{if(m.has(k))Object.assign(m.get(k),v)});return [...m.values()]};
 const admRows=()=>{const a=S.ad;const base=a.items.filter(x=>!a.dels.includes(x.id)).map(x=>({...x,...(a.ed[x.id]||{})}));const add=a.adds.map((x,i)=>({...x,id:"new"+i,src:"new",auto:null,ov:false}));return [...base,...add].filter(x=>a.cur===null||x.region==a.cur)};
@@ -205,11 +207,21 @@ function admg(){const a=S.ad;if(!a)return"";const rs=admRegs(),cr=rs.find(x=>x.r
   return `<div class="flex" style="align-items:center;gap:14px;margin:6px 0 16px"><div class="av" style="background:var(--card);border:1px solid var(--line);color:var(--tx);width:48px;height:48px" onclick="go('adm')">${I("back",22)}</div><h1 style="font-size:23px;flex:1">${esc(a.name)}</h1><div class="sw ${a.hide?"off":""}" onclick="S.ad.hide=!S.ad.hide;render()" title="O'yinni ko'rsatish"></div></div>
   ${a.hide?`<div class="card" style="color:var(--bad)">Bu o'yin mijozlarga ko'rinmaydi</div>`:""}${chips}${regCard}
   <div class="card"><div class="lbl">YANGI REGION</div><div class="flex"><input id="a_nr" placeholder="masalan: CIS, Global, Tojikiston" style="flex:1"><button class="btn" style="width:auto;padding:0 18px" onclick="admRegAdd()">＋</button></div></div>
+  ${a.infoblocks?`<div class="card"><div class="lbl">RASM VA TAVSIF</div>${(a.info||[]).map((b,i)=>`<div style="margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--line)">${b.img?`<img src="${esc(b.img)}" style="width:100%;border-radius:14px;display:block;margin-bottom:10px">`:""}<div class="flex" style="gap:8px;margin-bottom:8px"><label class="btn" style="width:auto;flex:1;padding:13px;background:var(--card2);text-align:center;margin:0">🖼 ${b.img?"Rasmni almashtirish":"Rasm tanlash"}<input type="file" accept="image/*" style="display:none" onchange="admInfoPick(${i},this)"></label>${b.img?`<button class="btn" style="width:auto;padding:0 14px;background:var(--card2)" onclick="admInfoRm(${i},1)">✕</button>`:""}<button class="btn" style="width:auto;padding:0 14px;background:var(--card2);color:#f87171" onclick="admInfoRm(${i})">🗑</button></div><textarea rows="5" placeholder="Tavsif (rasm tagida ko'rinadi)" oninput="S.ad.info[${i}].txt=this.value">${esc(b.txt||"")}</textarea></div>`).join("")}<div class="flex" style="gap:8px"><button class="btn" style="background:var(--card2)" onclick="admInfoAdd()">＋ Blok</button><button class="btn" onclick="admInfoSave()">Saqlash</button></div><small style="color:var(--mut);display:block;margin-top:8px">Blok = rasm + uning tagidagi tavsif. Mijoz bularni o'yin sahifasida ko'radi.</small></div>`:""}
   ${a.stars?"":`<div class="card"><div class="lbl">GURUHLAR</div>${admTabs().map((tn,i)=>`<div class="flex" style="gap:8px;margin-bottom:8px"><input id="a_tn${i}" value="${esc(tn)}" style="flex:1"><button class="btn" style="width:auto;padding:0 16px;background:var(--card2)" onclick="admTabRen(${i})">✓</button></div>`).join("")}<div class="flex" style="gap:8px;margin-top:4px"><input id="a_nt" placeholder="Yangi guruh nomi" style="flex:1"><button class="btn" style="width:auto;padding:0 18px" onclick="admTabAdd()">＋</button></div><small style="color:var(--mut);display:block;margin-top:8px">Nomni o'zgartirib ✓ bosing. Mahsulotni guruhga o'tkazish: mahsulot kartasidagi ro'yxatdan guruhni tanlab, «Saqlash» bosing.</small></div>`}
   <div class="lbl">MAHSULOTLAR (${rows.length})</div>${list||`<p style="color:var(--mut)">Bu yerda mahsulot yo'q.</p>`}
   <div class="card"><div class="lbl">YANGI MAHSULOT ${a.cur?"("+esc(a.cur)+")":""}</div><input id="a_n" placeholder="Nomi (masalan: 100 Diamonds)" style="margin-bottom:10px"><div class="flex" style="margin-bottom:10px"><input id="a_p" type="number" step="0.01" placeholder="Narx (somoni)" style="flex:1"><input id="a_t" list="a_tl" placeholder="Guruh (💎)" style="flex:1"><datalist id="a_tl">${admTabs().map(tn=>`<option value="${esc(tn)}">`).join("")}</datalist></div><input id="a_s" placeholder="Donatix mahsulot kodi (ixtiyoriy, avto yetkazish uchun)" style="margin-bottom:10px"><button class="btn" style="background:var(--card2)" onclick="admAdd()">＋ Mahsulot qo'shish</button></div>
   <div style="padding:0 16px 130px"><button class="btn" style="background:var(--card2);color:#f87171" onclick="admDelGame()">🗑 ${a.auto?"O'yinni o'chirish":"O'yinni o'chirish (yashirish)"}</button></div>
   <div class="buy"><button class="btn" id="a_save" onclick="admSave()">Saqlash${admDirty()?" ●":""}</button></div>`}
+function admInfoAdd(){S.ad.info.push({img:"",txt:""});render()}
+function admInfoRm(i,onlyImg){if(onlyImg)S.ad.info[i].img="";else S.ad.info.splice(i,1);render()}
+function admInfoPick(i,inp){const f=inp.files&&inp.files[0];if(!f)return;const rd=new FileReader();
+  rd.onload=()=>{const im=new Image();im.onload=()=>{const sc=Math.min(1,900/Math.max(im.width,im.height)),cv=document.createElement("canvas");cv.width=Math.round(im.width*sc);cv.height=Math.round(im.height*sc);
+    cv.getContext("2d").drawImage(im,0,0,cv.width,cv.height);S.ad.info[i].img=cv.toDataURL("image/jpeg",.82);render()};im.onerror=()=>alert(t("err"));im.src=rd.result};rd.readAsDataURL(f)}
+async function admInfoSave(){const a=S.ad;
+  const blocks=(a.info||[]).map(b=>({txt:b.txt||"",img:(b.img||"").startsWith("data:")?b.img:(b.img?"keep:"+((b.img.match(/\/gi\/[^\/]+\/(\d+)/)||[])[1]||"x"):"")}));
+  const r=await api("/api/admin/info",{game:a.id,blocks});
+  if(r&&r.ok){toast("Saqlandi ✓");S.cat=(await api("/api/catalog"))||S.cat;admLoad(a.id,a.cur)}else alert((r&&r.msg)||t("err"))}
 async function admDelGame(){const a=S.ad,msg=a.auto?"«"+a.name+"» o'yini butunlay o'chirilsinmi?":"«"+a.name+"» asosiy o'yin, o'chirib bo'lmaydi, lekin mijozlardan yashiriladi. Davom etasizmi?";
   const go2=async ok=>{if(!ok)return;const r=await api("/api/admin/save",{game:a.id,del_game:true});
     if(r&&r.ok){toast(r.deleted?"O'chirildi":"Yashirildi");S.cat=(await api("/api/catalog"))||S.cat;admOpen()}else alert(t("err"))};

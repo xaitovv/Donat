@@ -173,6 +173,25 @@
      }
     ]
    }
+  },
+  {
+   "id": "efootball",
+   "name": "EFOOTBALL",
+   "sub": "Coins",
+   "icon": "⚽",
+   "color": "#4f46e5",
+   "new": true,
+   "tabs": {}
+  },
+  {
+   "id": "guildbot",
+   "name": "БОТ ДЛЯ ГИЛЬДИИ",
+   "sub": "Guild Bot",
+   "icon": "🛡",
+   "color": "#7c3aed",
+   "new": true,
+   "infoblocks": true,
+   "tabs": {}
   }
  ],
  "gifts": [
