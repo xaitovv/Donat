@@ -1051,8 +1051,12 @@ async def dx_icons():
         if u: D.icon_set(a["game_id"], u); ok += 1
     sample = ""
     if not ok:
-        sample = "product image_url: " + repr([p.get("image_url") for p in prods[:3]]) if prods else ""
-        if cats: sample += "\ncategory image_url: " + repr([c.get("image_url") for c in cats[:3]])
+        npi = sum(1 for p in prods if p.get("image_url")); nci = sum(1 for c in cats if c.get("image_url"))
+        sample = f"image_url bor: mahsulot {npi}/{len(prods)}, kategoriya {nci}/{len(cats)}"
+        if cats: sample += "\nkategoriya: " + json.dumps({k: (v if k != "products" else "...") for k, v in cats[0].items()}, ensure_ascii=False)[:500]
+        if prods:
+            st, d = await DX.call("GET", "/products/" + urllib.parse.quote(str(prods[0]["product_id"])))
+            sample += f"\nmahsulot HTTP {st}: " + json.dumps(d, ensure_ascii=False)[:700]
     return ok, tot, sample
 def _dl_icon(url, path):
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; DiavexBot/1.0)", "Accept": "image/*"})
