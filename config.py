@@ -80,3 +80,21 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-latest").strip()
 ORDERS_CHANNEL = os.getenv("ORDERS_CHANNEL", "").strip()     # @kanal_nomi yoki -100... (bot kanalda admin bo'lishi kerak)
 CH_FULL = os.getenv("CH_FULL", "0").strip() == "1"           # 1 = ID va Telegram ID to'liq ko'rsatiladi (standart: qisman yashiriladi)
 CH_LANG = os.getenv("CH_LANG", "tg").strip()                 # kanal posti tili: tg, ru, uz, en
+
+# --- Majburiy obuna ---
+# REQUIRED_CHANNELS = @kanal1,@kanal2   yoki yopiq kanal uchun:  -1001234567890|https://t.me/+AbCdEf|Kanal nomi
+# (vergul bilan ajrating; bot har bir kanalda ADMIN bo'lishi shart)
+def _channels():
+    out = []
+    for p in os.getenv("REQUIRED_CHANNELS", "").replace("\n", ",").split(","):
+        p = p.strip()
+        if not p: continue
+        cid, url, title = (p.split("|") + ["", ""])[:3]
+        cid, url, title = cid.strip(), url.strip(), title.strip()
+        if cid.startswith("https://t.me/") and "+" not in cid: cid = "@" + cid.rstrip("/").split("/")[-1]
+        if not url and cid.startswith("@"): url = "https://t.me/" + cid[1:]
+        try: chat = int(cid)
+        except ValueError: chat = cid
+        out.append({"id": chat, "url": url, "name": title or (cid if cid.startswith("@") else f"Kanal {len(out) + 1}")})
+    return out
+REQ_CHANNELS = _channels()

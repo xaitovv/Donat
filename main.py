@@ -86,11 +86,63 @@ async def welcome(chat_id, l):
             logging.exception("welcome: keyboard failed")
             await bot.send_message(chat_id, w["text"], parse_mode="HTML")
 
+
+# ---------- MAJBURIY OBUNA ----------
+_TS = {
+ "uz": dict(t="🔒 <b>Botdan foydalanish uchun quyidagi kanallarga obuna bo'ling</b>\n\nObuna bo'lgach «✅ Tekshirish» tugmasini bosing.", chk="✅ Tekshirish", no="❌ Siz hali hamma kanalga obuna bo'lmagansiz!"),
+ "tg": dict(t="🔒 <b>Барои истифодаи бот ба каналҳои зерин обуна шавед</b>\n\nБаъд аз обуна тугмаи «✅ Тафтиш»-ро пахш кунед.", chk="✅ Тафтиш", no="❌ Шумо ҳанӯз ба ҳамаи каналҳо обуна нашудаед!"),
+ "ru": dict(t="🔒 <b>Для использования бота подпишитесь на каналы ниже</b>\n\nПосле подписки нажмите «✅ Проверить».", chk="✅ Проверить", no="❌ Вы ещё не подписались на все каналы!"),
+ "en": dict(t="🔒 <b>Please subscribe to the channels below to use the bot</b>\n\nThen tap “✅ Check”.", chk="✅ Check", no="❌ You haven't subscribed to all channels yet!"),
+}
+SUB_OK = {}; SUB_WARNED = set()
+async def sub_missing(uid, fresh=False):
+    """Obuna bo'lmagan kanallar ro'yxati (bo'sh = hammasi joyida). Admin va sozlanmagan holatda doim bo'sh."""
+    if not C.REQ_CHANNELS or uid == C.ADMIN_ID: return []
+    if not fresh and time.time() - SUB_OK.get(uid, 0) < 120: return []
+    miss = []
+    for ch in C.REQ_CHANNELS:
+        try:
+            mb = await bot.get_chat_member(ch["id"], uid)
+            if mb.status in ("left", "kicked") or (mb.status == "restricted" and getattr(mb, "is_member", True) is False): miss.append(ch)
+        except Exception as e:   # bot kanalda admin emas / kanal topilmadi: foydalanuvchini qamamaymiz, adminga bir marta xabar beramiz
+            logging.warning("sub check %s: %s", ch["id"], e)
+            if ch["id"] not in SUB_WARNED:
+                SUB_WARNED.add(ch["id"]); asyncio.create_task(admin_say(f"⚠️ Majburiy obuna: <code>{H.escape(str(ch['id']))}</code> kanalini tekshirib bo'lmadi. Bot shu kanalda ADMIN ekanini va REQUIRED_CHANNELS to'g'ri yozilganini tekshiring.\n<code>{H.escape(str(e))[:200]}</code>"))
+    if not miss:
+        if len(SUB_OK) > 20000: SUB_OK.clear()
+        SUB_OK[uid] = time.time()
+    return miss
+def sub_kb(l, miss):
+    rows = [[InlineKeyboardButton(text="📢 " + ch["name"], url=ch["url"])] for ch in miss if ch["url"].startswith("http")]
+    rows.append([InlineKeyboardButton(text=_TS[l]["chk"], callback_data="chksub")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+async def gate(chat_id, uid, l):
+    """True = obuna bor, davom etish mumkin. Aks holda obuna xabarini yuboradi va False qaytaradi."""
+    l = l if l in _TS else "ru"
+    miss = await sub_missing(uid, fresh=True)
+    if not miss: return True
+    await bot.send_message(chat_id, _TS[l]["t"], parse_mode="HTML", reply_markup=sub_kb(l, miss))
+    return False
+
+@dp.callback_query(F.data == "chksub")
+async def chksub(c: CallbackQuery):
+    l = lang_of(c.from_user.id); l = l if l in _TS else "ru"
+    miss = await sub_missing(c.from_user.id, fresh=True)
+    if miss:
+        await c.answer(_TS[l]["no"], show_alert=True)
+        try: await c.message.edit_reply_markup(reply_markup=sub_kb(l, miss))
+        except Exception: pass
+        return
+    await c.answer()
+    try: await c.message.delete()
+    except Exception: pass
+    await welcome(c.from_user.id, l)
+
 @dp.message(CommandStart())
 async def start(m: Message, command: CommandObject):
     u = D.user(m.from_user.id, m.from_user.full_name, command.args)
-    if u["lang_set"]: await welcome(m.chat.id, u["lang"])
-    else: await m.answer(PICK, reply_markup=picker())
+    if not u["lang_set"]: return await m.answer(PICK, reply_markup=picker())
+    if await gate(m.chat.id, m.from_user.id, u["lang"]): await welcome(m.chat.id, u["lang"])
 
 @dp.message(Command("lang"))
 async def lang_cmd(m: Message):
@@ -109,7 +161,7 @@ async def pick_lang(c: CallbackQuery):
     await c.answer()
     try: await c.message.delete()
     except Exception: pass
-    await welcome(c.from_user.id, l)
+    if await gate(c.from_user.id, c.from_user.id, l): await welcome(c.from_user.id, l)
 
 @dp.message(F.photo)  # mijoz chek yuboradi -> adminga
 async def receipt(m: Message):
@@ -507,6 +559,8 @@ async def mw(req, handler):
                 u = check_init(req.headers.get("X-Init", ""))
                 if not u: return web.json_response({"error": "auth"}, status=401, headers=cors())
                 req["u"] = D.user(u["id"], u.get("first_name", "")); req["tg"] = u
+                miss = await sub_missing(u["id"])
+                if miss: return web.json_response({"error": "sub", "channels": [{"name": x["name"], "url": x["url"]} for x in miss]}, status=403, headers=cors())
                 # so'rovlar cheklovi: umumiy 60/daq, buyurtma/to'lov 12/daq
                 if _rl(hits, u["id"], 60) or (req.method == "POST" and _rl(whits, u["id"], 12)):
                     return web.json_response({"error": "rate"}, status=429, headers=cors())

@@ -25,3 +25,8 @@ Topilmasa: /dxcats so'z, /dxcat o'yin_id kategoriya_id, so'ng /dxsync o'yin_id. 
 ## Chekni AI bilan tekshirish (ixtiyoriy)
 Render -> Environment: ANTHROPIC_API_KEY (Claude API kaliti), AI_MODEL (ixtiyoriy). Chek adminga kelgach, tagiga AI natijasi qo'shiladi:
 chek ekanligi, summa, qabul qiluvchi raqam, sana, tahrir belgilari. Qaror baribir adminda. Bir xil chek rasmi ikki marta qabul qilinmaydi.
+
+## Majburiy obuna
+Render -> Environment: REQUIRED_CHANNELS = @kanal1,@kanal2
+Yopiq kanal: -1001234567890|https://t.me/+InviteKod|Kanal nomi  (vergul bilan ajrating)
+Bot HAR BIR kanalda admin bo'lishi shart. Oqim: /start -> til -> obuna -> «Tekshirish» -> menyu. Obunasiz Mini App ham ochilmaydi (API 403).

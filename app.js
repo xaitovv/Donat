@@ -3,18 +3,25 @@ const T0=Date.now();
 const tg=window.Telegram?.WebApp;tg?.ready();tg?.expand();
 const $=s=>document.querySelector(s);
 const S={u:{balance:0,spent:0,ref:"",refs:0,bonus:0},cat:{games:[],bot:"",support:""},tab:"games",view:"menu",game:null,sel:null,pid:"",region:"",hist:{orders:[],fin:[]},htab:"orders"};
-async function api(p,b){try{const r=await fetch(API+p,{method:b?"POST":"GET",headers:{"Content-Type":"application/json","X-Init":tg?.initData||""},body:b?JSON.stringify(b):undefined});return await r.json()}catch(e){return null}}
+async function api(p,b){try{const r=await fetch(API+p,{method:b?"POST":"GET",headers:{"Content-Type":"application/json","X-Init":tg?.initData||""},body:b?JSON.stringify(b):undefined});const j=await r.json();if(j&&j.error=="sub"&&!S.locked)lock(j.channels);return j}catch(e){return null}}
+const SUBT={uz:["Obuna bo'ling","Ilovadan foydalanish uchun quyidagi kanallarga obuna bo'ling","✅ Tekshirish","Siz hali hamma kanalga obuna bo'lmagansiz!"],tg:["Обуна шавед","Барои истифодаи барнома ба каналҳои зерин обуна шавед","✅ Тафтиш","Шумо ҳанӯз ба ҳамаи каналҳо обуна нашудаед!"],ru:["Подпишитесь","Чтобы пользоваться приложением, подпишитесь на каналы ниже","✅ Проверить","Вы ещё не подписались на все каналы!"],en:["Subscribe","Please subscribe to the channels below to use the app","✅ Check","You haven't subscribed to all channels yet!"]};
+function lock(chs){S.locked=true;const s=SUBT[LANG]||SUBT.ru;$("#splash").classList.add("hide");$("#nav").style.display="none";if(tg)tg.BackButton.hide();
+  $("#app").innerHTML=`<div style="padding:40px 16px;text-align:center"><div style="font-size:56px">🔒</div><h2 style="margin:12px 0 6px">${s[0]}</h2><p style="color:var(--mut);margin:0 0 20px">${s[1]}</p>`+(chs||[]).map(c=>`<a class="btn" style="display:block;margin-bottom:10px;text-decoration:none;box-sizing:border-box" href="${esc(c.url)}" onclick="event.preventDefault();openCh('${esc(c.url)}')">📢 ${esc(c.name)}</a>`).join("")+`<button class="btn" style="margin-top:10px;background:#16a34a" onclick="unlock()">${s[2]}</button></div>`}
+function openCh(u){if(tg&&u.includes("t.me"))tg.openTelegramLink(u);else window.open(u,"_blank")}
+async function unlock(){const s=SUBT[LANG]||SUBT.ru;const r=await api("/api/me");if(r&&!r.error){S.locked=false;$("#nav").style.display="";init()}else if(r&&r.error=="sub"){lock(r.channels);(tg?.showAlert?tg.showAlert(s[3]):alert(s[3]))}}
 const fmt=n=>(+n).toLocaleString("ru",{maximumFractionDigits:2});
 const go=async v=>{S.view=v;if(v=="hist"){const r=await api("/api/history");if(r)S.hist=r}render();scrollTo(0,0)};
 const NAV=[["menu","grid","menu"],["hist","hist","history"],["friends","users","friends"],["set","user","settings"]];
 async function init(){
   await setLang(localStorage.getItem("lang")||"ru");
   const [me,cat]=await Promise.all([api("/api/me"),api("/api/catalog")]);
+  if(S.locked)return;
   if(me&&!me.error){S.u=me;if(me.lang&&me.lang!==LANG)await setLang(me.lang)}
   if(cat)S.cat=cat;
   if(localStorage.getItem("light"))document.body.classList.add("light");
   render();if(new URLSearchParams(location.search).get("go")=="hist")go("hist");setTimeout(()=>$("#splash").classList.add("hide"),Math.max(0,3000-(Date.now()-T0)))}
 function render(){
+  if(S.locked)return;
   const v=S.view,m={menu,game,topup,meth,hist,friends,set,rev,top:topv,res:resv,adm,admg,pay:payv},sub=["game","topup","meth","pay","rev","res","adm","admg"].includes(v);
   $("#app").innerHTML=m[v]();
   $("#nav").style.display=v=="res"?"none":"";
