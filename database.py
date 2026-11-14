@@ -51,17 +51,20 @@ def user(uid, name="", inviter=None):
         q("INSERT INTO users(id,name,ref,invited_by) VALUES(?,?,?,?)", (uid, name, secrets.token_urlsafe(6).upper(), inv))
         u = q("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
     return u
-def _pending(uid):
-    """Mijozda tasdiqlanmagan so'rov (buyurtma yoki to'lov) bormi. Eski to'lovlar 12 soatdan keyin o'zi yopiladi."""
+MAX_TOPUPS = 1   # javob berilmagan balans to'ldirish so'rovlari chegarasi
+MAX_ORDERS = 3   # javob berilmagan buyurtmalar chegarasi
+def _pending(uid, kind):
+    """kind='topup' yoki 'order': mijozda javob berilmagan so'rovlar soni. Eski to'lovlar 12 soatdan keyin o'zi yopiladi."""
     db.execute("UPDATE topups SET status='expired' WHERE status='pending' AND ts < datetime('now','-12 hours')")
-    return db.execute("SELECT (SELECT COUNT(*) FROM orders WHERE uid=? AND status IN ('pending','processing'))+(SELECT COUNT(*) FROM topups WHERE uid=? AND status='pending')", (uid, uid)).fetchone()[0] > 0
-def has_pending(uid):
-    with _l: return _pending(uid)
+    if kind == "topup": return db.execute("SELECT COUNT(*) FROM topups WHERE uid=? AND status='pending'", (uid,)).fetchone()[0]
+    return db.execute("SELECT COUNT(*) FROM orders WHERE uid=? AND status IN ('pending','processing')", (uid,)).fetchone()[0]
+def has_pending(uid, kind="topup"):
+    with _l: return _pending(uid, kind) >= (MAX_TOPUPS if kind == "topup" else MAX_ORDERS)
 def buy(uid, title, pid, price, game="", item="", fields="", qty=1):
     """Atomik: -1 = tasdiqlanmagan so'rov bor, None = mablag' yetarli emas, aks holda buyurtma raqami."""
     with _l:
         db.execute("BEGIN IMMEDIATE")
-        if _pending(uid):
+        if _pending(uid, "order") >= MAX_ORDERS:
             db.execute("ROLLBACK"); return -1
         r = db.execute("UPDATE users SET balance=balance-?,spent=spent+? WHERE id=? AND balance>=?", (price, price, uid, price))
         if r.rowcount == 0:
@@ -73,7 +76,7 @@ def add_topup(uid, amount, method):
     """Atomik: -1 = tasdiqlanmagan so'rov bor, aks holda so'rov raqami."""
     with _l:
         db.execute("BEGIN IMMEDIATE")
-        if _pending(uid):
+        if _pending(uid, "topup") >= MAX_TOPUPS:
             db.execute("ROLLBACK"); return -1
         tid = db.execute("INSERT INTO topups(uid,amount,method) VALUES(?,?,?)", (uid, amount, method)).lastrowid
         db.execute("COMMIT"); return tid

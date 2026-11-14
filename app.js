@@ -13,13 +13,12 @@ const fmt=n=>(+n).toLocaleString("ru",{maximumFractionDigits:2});
 const go=async v=>{S.view=v;if(v=="hist"){const r=await api("/api/history");if(r)S.hist=r}render();scrollTo(0,0)};
 const NAV=[["menu","grid","menu"],["hist","hist","history"],["friends","users","friends"],["set","user","settings"]];
 async function init(){
-  await setLang(localStorage.getItem("lang")||"ru");
-  const [me,cat]=await Promise.all([api("/api/me"),api("/api/catalog")]);
+  const [,me,cat]=await Promise.all([setLang(localStorage.getItem("lang")||"ru"),api("/api/me"),api("/api/catalog")]);
   if(S.locked)return;
   if(me&&!me.error){S.u=me;if(me.lang&&me.lang!==LANG)await setLang(me.lang)}
   if(cat)S.cat=cat;
   if(localStorage.getItem("light"))document.body.classList.add("light");
-  render();if(new URLSearchParams(location.search).get("go")=="hist")go("hist");setTimeout(()=>$("#splash").classList.add("hide"),Math.max(0,3000-(Date.now()-T0)))}
+  render();if(new URLSearchParams(location.search).get("go")=="hist")go("hist");setTimeout(()=>$("#splash").classList.add("hide"),Math.max(0,1500-(Date.now()-T0)))}
 function render(){
   if(S.locked)return;
   const v=S.view,m={menu,game,topup,meth,hist,friends,set,rev,top:topv,res:resv,adm,admg,pay:payv},sub=["game","topup","meth","pay","rev","res","adm","admg"].includes(v);
