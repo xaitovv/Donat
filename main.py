@@ -716,16 +716,16 @@ CH_WARN = {"t": 0.0}
 def ch_target():
     v = C.ORDERS_CHANNEL
     return int(v) if re.fullmatch(r"-?\d+", v or "") else v
-def ch_text(o, uname):
-    """Kanalga yuboriladigan 'chek' matni. Standart holatda ID va Telegram ID qisman yashiriladi (CH_FULL=1 bo'lsa to'liq)."""
-    t = CH_T.get(C.CH_LANG, CH_T["tg"]); e = H.escape; full = C.CH_FULL
-    pid = str(o["pid"] or ""); who = str(o["uid"])
-    L = [t["head"], "━━━━━━━━━━━━━━━━━━",
+def ch_text(o, uname, uname_tg=""):
+    """Kanalga yuboriladigan 'chek' matni: to'liq ID, ism, @username va oxirida Telegram ID; tepada va pastda chiziq."""
+    t = CH_T.get(C.CH_LANG, CH_T["tg"]); e = H.escape
+    pid = str(o["pid"] or ""); LINE = "━━━━━━━━━━━━━━━━━━"
+    who = f"{e(str(uname or '—')[:30])}" + (f" (@{e(uname_tg)})" if uname_tg else "") + f" ({o['uid']})"
+    L = [t["head"], LINE,
          f"{t['game']}: <b>{e(o['game'] or '')}</b>", f"{t['prod']}: <b>{e(o['item'] or o['title'] or '')}</b>",
-         f"{t['pid']}: {e(pid if full else _mask(pid))}"]
+         f"{t['pid']}: {e(pid)}"]
     if o["nick"]: L.append(f"{t['nick']}: <b>{e(o['nick'])}</b>")
-    L += [f"{t['amt']}: <b>{o['price']:.2f} {t['cur']}</b>", f"{t['order']}: <b>#{o['id']}</b>",
-          f"{t['user']}: {e(str(uname or '—')[:20])} ({e(who if full else _mask(who))})"]
+    L += [f"{t['amt']}: <b>{o['price']:.2f} {t['cur']}</b>", f"{t['order']}: <b>#{o['id']}</b>", f"{t['user']}: {who}", LINE]
     return "\n".join(L)
 async def post_channel(oid):
     """Bajarilgan buyurtmani kanalga yuboradi (kanal sozlanmagan bo'lsa hech narsa qilmaydi)."""
@@ -733,7 +733,11 @@ async def post_channel(oid):
     try:
         o = D.q("SELECT o.*, u.name uname FROM orders o JOIN users u ON u.id=o.uid WHERE o.id=?", (oid,)).fetchone()
         if not o: return
-        await bot.send_message(ch_target(), ch_text(o, o["uname"]), parse_mode="HTML", disable_notification=True)
+        un = ""; nm = o["uname"]
+        try:
+            ch = await bot.get_chat(o["uid"]); un = ch.username or ""; nm = ch.full_name or nm
+        except Exception: pass   # foydalanuvchi ma'lumotini olib bo'lmasa, bazadagi ismi bilan yuboriladi
+        await bot.send_message(ch_target(), ch_text(o, nm, un), parse_mode="HTML", disable_notification=True)
     except Exception as e:
         logging.exception("kanalga yuborib bo'lmadi")
         if time.time() - CH_WARN["t"] > 3600:   # adminga soatiga bir marta xabar beramiz
