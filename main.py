@@ -1316,7 +1316,7 @@ async def order(r):
         gname = fg["name"]; iname = it["name"]; price = it["price"]; stars = False
         product = iname + (f" [{region}]" if region else "")
         sg = next((x for x in C.CATALOG["games"] if x["id"] == gid), {}); rr = region if region in (sg.get("regions") or []) else ""
-        st, nick = await check_id(gid, pid, rr)   # ID ni server o'zi tekshiradi
+        st, nick = ("unv", "") if fg.get("clan") else await check_id(gid, pid, rr)   # ID ni server o'zi tekshiradi (klan ID ni tekshirib bo'lmaydi)
         if st == "noid": return web.json_response({"error": "noid"})
         sku = dx_resolve(iid, rr); fields = {"player_id": pid}   # Donatix'ga bog'langan bo'lsa avto
     oid = D.buy(uid, f"{gname} {product}", pid, price, gname, iname, fj, qty)  # narx serverdan olinadi

@@ -81,3 +81,14 @@ input{width:100%;background:var(--bg);border:1px solid var(--line);border-radius
 .bdg{position:absolute;top:6px;right:6px;z-index:2;font-size:10px;font-weight:800;letter-spacing:.4px;line-height:1;padding:4px 7px;border-radius:8px;color:#fff;font-style:normal}
 .bdg.a{background:#16a34a}.bdg.n{background:#7c3aed}
 textarea{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:16px;padding:14px;color:var(--tx);font-size:15px;outline:0;resize:vertical;font-family:inherit}
+
+/* admin panel */
+.adm-wrap input,.adm-wrap select,.adm-wrap textarea{font-size:17px;padding:16px}
+.adm-wrap .lbl{font-size:13px;margin:20px 0 12px}
+.adm-wrap .card{padding:20px;border-radius:26px}
+.adm-wrap .gr{display:flex;align-items:center;gap:14px;padding:14px 16px}
+.adm-wrap .fl{display:block;color:var(--mut);font-size:13px;font-weight:600;margin:0 0 6px 4px}
+.adm-wrap .meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.pill{display:inline-block;background:var(--card2);color:var(--mut);border-radius:10px;padding:6px 11px;font-size:13px;font-weight:600}
+.pill.lk{color:#8b7bff}.pill.dl{color:#f87171}
+.chipbar{position:sticky;top:0;z-index:5;background:var(--bg);padding:8px 0 12px;margin:0 -2px}
