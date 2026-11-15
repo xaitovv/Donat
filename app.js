@@ -210,7 +210,8 @@ const ST={done:"st_done",pending:"st_wait",processing:"st_wait",cancelled:"st_ca
 function setH(k,v){S[k]=v;render()}
 async function refreshHist(){const r=await api("/api/history");if(r){S.hist=r;render()}}
 const admBack=(to,title)=>`<div class="flex" style="align-items:center;gap:14px;margin:6px 0 16px"><div class="av" style="background:var(--card);border:1px solid var(--line);color:var(--tx);width:48px;height:48px" onclick="go('${to}')">${I("back",22)}</div><h1 style="font-size:24px">${title}</h1></div>`;
-async function admOpen(stay){const r=await api("/api/admin/games");if(r&&r.ok){S.adm=r;if(stay&&S.view=="adm"){const y=scrollY;render();scrollTo(0,y)}else go("adm")}else alert(t("err"))}
+async function admOpen(stay){const r=await api("/api/admin/games");if(!(r&&r.ok))return alert(t("err"));S.adm=r;
+  if(!stay)return go("adm");if(S.view=="adm"){const y=scrollY;render();scrollTo(0,y)}}   // stay: foydalanuvchi boshqa sahifaga o'tib ketgan bo'lsa, uni qaytarib olib kirmaymiz
 function adm(){const A=S.adm||{games:[],settings:{}};
   const row=(g,i)=>`<div class="card gr" style="${g.hidden?"opacity:.55":""}" onclick="admGame(${i})"><div class="av" style="width:64px;height:64px;background:${esc(g.color)};border-radius:16px;position:relative;flex:none">${esc(g.icon)}${pi(g.id)}</div><div style="flex:1;min-width:0"><b style="font-size:18px">${esc(g.name)}</b><br><small style="color:var(--mut);font-size:14px">${g.count} ta mahsulot${g.hidden?" · yashirin":""}</small></div><span style="color:var(--mut);font-size:24px">›</span></div>`;
   const all=A.games.map((g,i)=>[g,i]),vis=all.filter(x=>!x[0].hidden),hid=all.filter(x=>x[0].hidden);
@@ -218,7 +219,7 @@ function adm(){const A=S.adm||{games:[],settings:{}};
   <div class="lbl">O'YINLAR (${vis.length})</div>${vis.map(x=>row(...x)).join("")}${hid.length?`<div class="lbl">YASHIRIN O'YINLAR (${hid.length})</div>`+hid.map(x=>row(...x)).join(""):""}</div>`}
 async function admSaveSet(){const r=await api("/api/admin/save",{game:"",settings:{markup:+$("#a_mk").value,usd_tjs:+$("#a_rt").value}});if(r&&r.ok){toast("Saqlandi");S.cat=(await api("/api/catalog"))||S.cat;admOpen(true)}else alert((r&&r.msg)||t("err"))}
 async function admLoad(id,keep,stay){const r=await api("/api/admin/game?id="+encodeURIComponent(id));if(!(r&&r.ok&&r.game))return alert(t("err"));
-  S.ad={...r.game,ed:{},adds:[],dels:[],rg:{},newRegs:[],newTabs:[],trn:{},info:(r.game.info||[]).map(x=>({img:x.img||"",txt:x.txt||""})),cur:keep===undefined?null:keep,hide:r.game.hidden};if(stay&&S.view=="admg"){const y=scrollY;render();scrollTo(0,y)}else go("admg")}
+  S.ad={...r.game,ed:{},adds:[],dels:[],rg:{},newRegs:[],newTabs:[],trn:{},info:(r.game.info||[]).map(x=>({img:x.img||"",txt:x.txt||""})),cur:keep===undefined?null:keep,hide:r.game.hidden};if(!stay)return go("admg");if(S.view=="admg"){const y=scrollY;render();scrollTo(0,y)}}
 function admGame(i){admLoad(S.adm.games[i].id)}
 const admRegs=()=>{const a=S.ad,m=new Map();a.regions.forEach(x=>m.set(x.region,{...x}));a.newRegs.forEach(x=>m.set(x.region,{...x,fresh:1}));Object.entries(a.rg).forEach(([k,v])=>{if(m.has(k))Object.assign(m.get(k),v)});return [...m.values()]};
 const admRows=()=>{const a=S.ad;const base=a.items.filter(x=>!a.dels.includes(x.id)).map(x=>({...x,...(a.ed[x.id]||{})}));const add=a.adds.map((x,i)=>({...x,id:"new"+i,src:"new",auto:null,ov:false}));return [...base,...add].filter(x=>a.cur===null||x.region==a.cur)};
@@ -238,7 +239,7 @@ function admTR(i,v){const a=S.ad,o=admTabs()[i];if(o===undefined)return;const nt
 const admRenPending=()=>Object.entries(S.ad.trn||{}).map(([from,to])=>({from,to:String(to).trim()})).filter(x=>x.to&&x.to!=x.from);
 const admDirty=()=>{const a=S.ad;return a&&(admRenPending().length||Object.keys(a.ed).length||a.adds.length||a.dels.length||Object.keys(a.rg).length||a.newRegs.length||a.hide!==a.hidden)};
 function admg(){const a=S.ad;if(!a)return"";const rs=admRegs(),cr=rs.find(x=>x.region==a.cur),rows=admRows(),tabs=admTabs();
-  const chips=`<div class="chipbar"><div class="reg chips" style="margin:0"><a class="${a.cur===null?"on":""}" onclick="admCur(-1)">Hammasi</a>${rs.map((r,i)=>`<a class="${a.cur===r.region?"on":""}" onclick="admCur(${i})" style="${r.hidden?"opacity:.5":""}">${esc(r.title||r.region)}</a>`).join("")}</div></div>`;
+  const chips=`<div class="card"><div class="lbl" style="margin-top:0">REGION TANLANG</div><div class="rchips"><a class="${a.cur===null?"on":""}" onclick="admCur(-1)">Hammasi</a>${rs.map((r,i)=>`<a class="${a.cur===r.region?"on":""}${r.hidden?" off":""}" onclick="admCur(${i})">${esc(r.title||r.region)}</a>`).join("")}</div></div>`;
   const regCard=cr?`<div class="card"><div class="lbl" style="margin-top:0">REGION: ${esc(cr.region)}</div><input placeholder="Ko'rinadigan nom (ixtiyoriy)" value="${esc(cr.title||"")}" oninput="admRegE('title',this.value)" style="margin-bottom:12px"><div class="flex" style="align-items:center;justify-content:space-between"><b>${cr.hidden?"Yashirin (mijoz ko'rmaydi)":"Ko'rinadi"}</b><div class="sw ${cr.hidden?"off":""}" onclick="admRegHide()"></div></div></div>`:"";
   const list=rows.map(x=>{const id=esc(x.id),del=(x.src=="cust"||x.src=="new"),src={dx:"Donatix",static:"oddiy",cust:"qo'lda",new:"yangi (saqlanmagan)",stars:"Donatix"}[x.src]||"";
     const ov=x.auto!=null&&(x.ov||(a.ed[x.id]&&a.ed[x.id].price!==undefined&&a.ed[x.id].price!=x.auto));

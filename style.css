@@ -91,4 +91,4 @@ textarea{width:100%;background:var(--bg);border:1px solid var(--line);border-rad
 .adm-wrap .meta{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
 .pill{display:inline-block;background:var(--card2);color:var(--mut);border-radius:10px;padding:6px 11px;font-size:13px;font-weight:600}
 .pill.lk{color:#8b7bff}.pill.dl{color:#f87171}
-.chipbar{position:sticky;top:0;z-index:5;background:var(--bg);padding:8px 0 12px;margin:0 -2px}
+.rchips{display:flex;flex-wrap:wrap;gap:10px}.rchips a{flex:none;max-width:100%;padding:12px 18px;border-radius:14px;background:var(--card2);border:1px solid var(--line);font-weight:700;font-size:15px;line-height:1.2;color:var(--mut);word-break:break-word}.rchips a.on{background:linear-gradient(135deg,#6d5bff,#8b5cf6);color:#fff;border-color:transparent}.rchips a.off{opacity:.5;text-decoration:line-through}
