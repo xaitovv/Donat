@@ -10,7 +10,12 @@ def _call(method, params):
                                  headers={"content-type": "application/json"}, method="POST")
     with urllib.request.urlopen(req, timeout=30) as r: return json.loads(r.read().decode())
 
+STATUS = ""
 def restore(path):
+    global STATUS
+    STATUS = _restore(path); return STATUS
+
+def _restore(path):
     """Baza fayli yo'q bo'lsa (yangi deploy), qadalgan zaxiradan tiklaydi. Qaytaradi: log uchun matn."""
     try:
         if os.path.exists(path) and os.path.getsize(path) > 4096: return "baza fayli bor, tiklash kerak emas"

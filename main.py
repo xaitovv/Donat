@@ -12,7 +12,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart, CommandObject
 from aiogram.types import (Message, CallbackQuery, InlineKeyboardMarkup,
                            InlineKeyboardButton, WebAppInfo, BufferedInputFile, FSInputFile, InputMediaDocument)
-import config as C, database as D, donatix as DX
+import config as C, database as D, donatix as DX, persist
 
 # Baza tuzilmasini o'zi tekshiradi (database.py eski bo'lsa ham ishlayveradi)
 for _s in ("CREATE TABLE IF NOT EXISTS ratings(oid INTEGER PRIMARY KEY,uid INTEGER,stars INTEGER)",
@@ -495,7 +495,8 @@ BK = {"changes": -1, "t": 0.0, "mid": None}
 async def backup_db(force=False):
     """Baza o'zgargan bo'lsa (kamida 45 soniyada bir marta) nusxasini admin chatidagi qadalgan xabarga yangilaydi."""
     ch = D.db.total_changes
-    if not force and (ch == BK["changes"] or time.time() - BK["t"] < 45): return False
+    if BK.get("blocked") and not force: return False
+    if not force and (ch == BK["changes"] or time.time() - BK["t"] < 8): return False
     path = "/tmp/diavex-backup.db"; D.snapshot(path)
     name = "diavex-backup-" + datetime.now(timezone(timedelta(hours=C.TZ_HOURS))).strftime("%Y%m%d-%H%M") + ".db"
     cap = "💾 Baza zaxirasi. O'chirmang va qadalgan holda qoldiring: server qayta ishga tushganda balans va buyurtmalar shundan tiklanadi."
@@ -505,6 +506,11 @@ async def backup_db(force=False):
             pm = getattr(await bot.get_chat(C.ADMIN_ID), "pinned_message", None)
             if pm and pm.document and str(pm.document.file_name or "").startswith("diavex-backup"): mid = pm.message_id
         except Exception: logging.warning("backup: qadalgan xabar topilmadi")
+        if mid and not force and D.q("SELECT COUNT(*) c FROM users").fetchone()["c"] <= 1 and "TIKLANDI" not in str(persist.STATUS) and "bor" not in str(persist.STATUS):
+            BK["blocked"] = True   # baza bo'sh, zaxira esa bor: ustidan yozib yubormaymiz
+            try: await bot.send_message(C.ADMIN_ID, "⚠️ Baza bo'sh ishga tushdi va zaxira tiklanmadi. Eski zaxira o'chirilmadi. Qadalgan zaxira xabarini o'chirmang va Render'da servisni qayta ishga tushiring (Manual Deploy). Kerak bo'lsa /backup bilan majburan yangilang.")
+            except Exception: pass
+            return False
     sent = None
     if mid:
         try:
@@ -563,7 +569,7 @@ async def mw(req, handler):
                 miss = await sub_missing(u["id"])
                 if miss: return web.json_response({"error": "sub", "channels": [{"name": x["name"], "url": x["url"]} for x in miss]}, status=403, headers=cors())
                 # so'rovlar cheklovi: umumiy 60/daq, buyurtma/to'lov 12/daq
-                if _rl(hits, u["id"], 60) or (req.method == "POST" and _rl(whits, u["id"], 12)):
+                if u["id"] != C.ADMIN_ID and (_rl(hits, u["id"], 120) or (req.method == "POST" and _rl(whits, u["id"], 12))):
                     return web.json_response({"error": "rate"}, status=429, headers=cors())
             r = await handler(req)
     except web.HTTPException: raise
@@ -1504,6 +1510,15 @@ async def main():
     run = web.AppRunner(app); await run.setup(); await web.TCPSite(run, "0.0.0.0", C.PORT).start()
     _t = asyncio.create_task(dx_worker()); TASKS.add(_t)
     _b = asyncio.create_task(bk_worker()); TASKS.add(_b)
+    import signal
+    def _bye():
+        async def fin():
+            try: await asyncio.wait_for(backup_db(), 8)
+            except Exception: logging.exception("yakuniy zaxira")
+            os._exit(0)
+        asyncio.get_running_loop().create_task(fin())
+    try: asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, _bye)
+    except Exception: pass
     await dp.start_polling(bot)
 if __name__ == "__main__":
     asyncio.run(main())
