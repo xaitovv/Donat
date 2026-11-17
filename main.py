@@ -244,6 +244,13 @@ _T4 = {
  "en": dict(ordrej="❌ <b>Your order was declined.</b>\n\n🏷 Order: #{no}\n💰 <b>+{amt} TJS</b> has been returned to your balance.\nIf this is a mistake, contact support."),
 }
 for _l, _d in _T4.items(): T[_l].update(_d)
+_T5 = {
+ "tg": dict(ordwait="⏳ <b>Фармоиши шумо бекор карда шуд.</b>\n\n🏷 Фармоиш: #{no}\n💰 <b>+{amt} сомонӣ</b> ба балансатон баргардонида шуд.\n🔁 Лутфан, пас аз 5 дақиқа дубора фармоиш диҳед."),
+ "ru": dict(ordwait="⏳ <b>Ваш заказ отменён.</b>\n\n🏷 Заказ: #{no}\n💰 <b>+{amt} сомони</b> возвращено на ваш баланс.\n🔁 Пожалуйста, оформите заказ заново через 5 минут."),
+ "uz": dict(ordwait="⏳ <b>Buyurtmangiz bekor qilindi.</b>\n\n🏷 Buyurtma: #{no}\n💰 <b>+{amt} somoni</b> balansingizga qaytarildi.\n🔁 Iltimos, 5 daqiqadan so'ng qayta buyurtma qiling."),
+ "en": dict(ordwait="⏳ <b>Your order was cancelled.</b>\n\n🏷 Order: #{no}\n💰 <b>+{amt} TJS</b> has been returned to your balance.\n🔁 Please place the order again in 5 minutes."),
+}
+for _l, _d in _T5.items(): T[_l].update(_d)
 PEND = {}
 def shop_kb(l):
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=W[l]["shop"], web_app=WebAppInfo(url=C.MINIAPP_URL))]])
@@ -328,18 +335,21 @@ async def text_in(m: Message):
             except Exception: pass
             await m.answer("✅ Sent")
 
-@dp.callback_query(F.data.regexp(r"^(od|or)\d+$"))
+@dp.callback_query(F.data.regexp(r"^(od|or|ow)\d+$"))
 async def order_decide(c: CallbackQuery):
     if c.from_user.id != C.ADMIN_ID: return await c.answer()
-    oid = int(c.data[2:]); okay = c.data.startswith("od"); done = False
-    if okay:
+    oid = int(c.data[2:]); okay = c.data.startswith("od"); wait = c.data.startswith("ow"); done = False
+    if wait:   # keyinga qoldirish: pul qaytadi, mijozga "5 daqiqadan so'ng qayta buyurtma qiling"
+        o = D.cancel_order(oid)
+        if o: done = True; await tell(o["uid"], "ordwait", no=oid, amt=f"{o['price']:.2f}")
+    elif okay:
         if D.q("UPDATE orders SET status='done' WHERE id=? AND status='pending'", (oid,)).rowcount:
             o = D.q("SELECT * FROM orders WHERE id=?", (oid,)).fetchone(); done = True; await notify(o["uid"], "done", o); await post_channel(o["id"])
     else:
         o = D.cancel_order(oid)
         if o: done = True; await tell(o["uid"], "ordrej", no=oid, amt=f"{o['price']:.2f}")
     try:
-        if done: await c.message.edit_text((c.message.html_text or "") + ("\n\n✅ <b>Bajarildi</b>" if okay else "\n\n❌ <b>Rad etildi (pul qaytarildi)</b>"), parse_mode="HTML")
+        if done: await c.message.edit_text((c.message.html_text or "") + ("\n\n✅ <b>Bajarildi</b>" if okay else "\n\n⏳ <b>Keyinga qoldirildi (pul qaytarildi, mijozga 5 daqiqa kutish xabari yuborildi)</b>" if wait else "\n\n❌ <b>Rad etildi (pul qaytarildi)</b>"), parse_mode="HTML")
         else: await c.message.edit_reply_markup()
     except Exception: pass
     await c.answer("OK" if done else "—")
@@ -664,8 +674,10 @@ def order_caption(oid, game, product, pid, price, uid, full, un, when, nick=""):
     e = H.escape
     return (f"🛒 <b>Buyurtma #{oid}</b>\n🎮 O'yin: <b>{e(game)}</b>\n📦 Mahsulot: <b>{e(product)}</b>\n🆔 O'yinchi ID: <code>{e(str(pid))}</code>\n🎭 Nik: {("<b>" + e(nick) + "</b>") if nick else "⚠ tasdiqlanmagan"}\n💰 Summa: <b>{price:g} somoni</b>\n"
             f"👤 Ism: {e(full)}\n🔗 Username: {e(un)}\n🆔 Telegram ID: <code>{uid}</code>\n🕒 Vaqt: {when}")
-def order_kb(oid):
-    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✅ Bajarildi", callback_data=f"od{oid}"), InlineKeyboardButton(text="❌ Rad etish", callback_data=f"or{oid}")]])
+def order_kb(oid, postpone=False):
+    rows = [[InlineKeyboardButton(text="✅ Bajarildi", callback_data=f"od{oid}"), InlineKeyboardButton(text="❌ Rad etish", callback_data=f"or{oid}")]]
+    if postpone: rows.append([InlineKeyboardButton(text="⏳ Keyinga qoldirish", callback_data=f"ow{oid}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 DXSTATE = {"on": True}; DX_RETRY = (5, 15); TASKS = set(); DX_WARNED = set()
 TEMP_CODES = {"rate_limited", "not_available", "temporarily_unavailable", "supplier_unavailable"}
 def dx_resolve(item_id, region):
@@ -709,7 +721,7 @@ async def dx_manual(oid, reason):
     """Avto bo'lmadi: buyurtma 'pending' qoladi, admin qo'lda bajaradi yoki rad etadi."""
     o, cap = order_row_caption(oid)
     if o and o["status"] == "pending":
-        await admin_say(cap + f"\n\n⚠ <b>Avto yuborilmadi:</b> {H.escape(str(reason))}\n👉 Qo'lda bajaring yoki rad eting.", order_kb(oid))
+        await admin_say(cap + f"\n\n⚠ <b>Avto yuborilmadi:</b> {H.escape(str(reason))}\n👉 Qo'lda bajaring yoki rad eting.", order_kb(oid, postpone="insufficient" in str(reason).lower()))
 CH_T = {
  "tg": dict(head="✅ <b>Фармоиш иҷро шуд!</b>", game="🎮 Бозӣ", prod="📦 Маҳсулот", pid="🆔 ID бозингар", nick="🎭 Никнейм", amt="💰 Маблағ", cur="сомонӣ", order="🏷 Фармоиш", user="👤 Корбар"),
  "ru": dict(head="✅ <b>Заказ выполнен!</b>", game="🎮 Игра", prod="📦 Товар", pid="🆔 ID игрока", nick="🎭 Никнейм", amt="💰 Сумма", cur="сомони", order="🏷 Заказ", user="👤 Пользователь"),
