@@ -10,13 +10,14 @@ from urllib.parse import parse_qsl
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command, CommandStart, CommandObject
-from aiogram.types import (Message, CallbackQuery, InlineKeyboardMarkup,
+from aiogram.types import (Message, CallbackQuery, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
                            InlineKeyboardButton, WebAppInfo, BufferedInputFile, FSInputFile, InputMediaDocument)
 import config as C, database as D, donatix as DX, persist
 
 # Baza tuzilmasini o'zi tekshiradi (database.py eski bo'lsa ham ishlayveradi)
 for _s in ("CREATE TABLE IF NOT EXISTS ratings(oid INTEGER PRIMARY KEY,uid INTEGER,stars INTEGER)",
            "ALTER TABLE users ADD COLUMN lang_set INTEGER DEFAULT 0",
+           "ALTER TABLE users ADD COLUMN phone TEXT DEFAULT ''",
            "ALTER TABLE orders ADD COLUMN game TEXT DEFAULT ''",
            "ALTER TABLE orders ADD COLUMN item TEXT DEFAULT ''",
            "ALTER TABLE ratings ADD COLUMN text TEXT DEFAULT ''",
@@ -137,13 +138,49 @@ async def chksub(c: CallbackQuery):
     await c.answer()
     try: await c.message.delete()
     except Exception: pass
+    if not has_phone(c.from_user.id): return await ask_phone(c.from_user.id, l)
     await welcome(c.from_user.id, l)
+
+
+# ---------- MAJBURIY TELEFON RAQAM ----------
+_PH = {
+ "uz": dict(ask="📱 <b>Davom etish uchun telefon raqamingizni yuboring</b>\n\nPastdagi «📱 Nomerni yuborish» tugmasini bosing va Telegram so'ragan ruxsatni tasdiqlang.\n\n⚠️ Faqat o'zingizning Telegram raqamingiz qabul qilinadi. Raqamsiz xarid qilib va balansni to'ldirib bo'lmaydi.", btn="📱 Nomerni yuborish", other="❌ Bu sizning raqamingiz emas. Faqat o'zingizning Telegram raqamingizni yuboring: pastdagi tugmani bosing.", ok="✅ Raqamingiz qabul qilindi. Rahmat!"),
+ "tg": dict(ask="📱 <b>Барои идома додан рақами телефони худро фиристед</b>\n\nТугмаи «📱 Фиристодани рақам»-ро пахш кунед ва иҷозати Telegram-ро тасдиқ намоед.\n\n⚠️ Танҳо рақами Telegram-и худи шумо қабул мешавад. Бе рақам харид кардан ва балансро пур кардан мумкин нест.", btn="📱 Фиристодани рақам", other="❌ Ин рақами шумо нест. Танҳо рақами Telegram-и худро фиристед: тугмаи поёнро пахш кунед.", ok="✅ Рақами шумо қабул шуд. Ташаккур!"),
+ "ru": dict(ask="📱 <b>Для продолжения отправьте свой номер телефона</b>\n\nНажмите кнопку «📱 Отправить номер» ниже и подтвердите запрос разрешения Telegram.\n\n⚠️ Принимается только номер вашего Telegram-аккаунта. Без номера нельзя покупать и пополнять баланс.", btn="📱 Отправить номер", other="❌ Это не ваш номер. Отправьте только номер своего Telegram-аккаунта: нажмите кнопку ниже.", ok="✅ Ваш номер принят. Спасибо!"),
+ "en": dict(ask="📱 <b>Please share your phone number to continue</b>\n\nTap the «📱 Share number» button below and confirm Telegram's permission prompt.\n\n⚠️ Only your own Telegram number is accepted. You can't buy or top up your balance without it.", btn="📱 Share number", other="❌ This is not your number. Please share only your own Telegram number: tap the button below.", ok="✅ Your number has been received. Thank you!"),
+}
+def has_phone(uid):
+    if uid == C.ADMIN_ID: return True
+    r = D.q("SELECT phone FROM users WHERE id=?", (uid,)).fetchone()
+    return bool(r and (r["phone"] or "").strip())
+def phone_kb(l):
+    return ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text=_PH[l]["btn"], request_contact=True)]], resize_keyboard=True, is_persistent=True)
+async def ask_phone(chat_id, l, key="ask"):
+    l = l if l in _PH else "ru"
+    await bot.send_message(chat_id, _PH[l][key], parse_mode="HTML", reply_markup=phone_kb(l))
+async def proceed(chat_id, uid, l):
+    """Til tanlangach: avval telefon raqam (majburiy), keyin obuna, keyin salomlashuv."""
+    if not has_phone(uid): return await ask_phone(chat_id, l)
+    if await gate(chat_id, uid, l): await welcome(chat_id, l)
+
+@dp.message(F.contact)
+async def got_contact(m: Message):
+    uid = m.from_user.id; u = D.user(uid, m.from_user.full_name); l = u["lang"] if u["lang"] in _PH else "ru"
+    ct = m.contact
+    # faqat o'zining raqami: contact.user_id yuboruvchiniki bo'lishi shart (boshqaning kontakti yoki forward qilingani o'tmaydi)
+    if ct.user_id != uid or m.forward_origin:
+        return await ask_phone(m.chat.id, l, "other")
+    ph = "+" + re.sub(r"\D", "", ct.phone_number or "")
+    if len(ph) < 8: return await ask_phone(m.chat.id, l, "other")
+    D.q("UPDATE users SET phone=? WHERE id=?", (ph, uid))
+    await m.answer(_PH[l]["ok"], reply_markup=ReplyKeyboardRemove())
+    if await gate(m.chat.id, uid, l): await welcome(m.chat.id, l)
 
 @dp.message(CommandStart())
 async def start(m: Message, command: CommandObject):
     u = D.user(m.from_user.id, m.from_user.full_name, command.args)
     if not u["lang_set"]: return await m.answer(PICK, reply_markup=picker())
-    if await gate(m.chat.id, m.from_user.id, u["lang"]): await welcome(m.chat.id, u["lang"])
+    await proceed(m.chat.id, m.from_user.id, u["lang"])
 
 @dp.message(Command("lang"))
 async def lang_cmd(m: Message):
@@ -162,7 +199,7 @@ async def pick_lang(c: CallbackQuery):
     await c.answer()
     try: await c.message.delete()
     except Exception: pass
-    if await gate(c.from_user.id, c.from_user.id, l): await welcome(c.from_user.id, l)
+    await proceed(c.from_user.id, c.from_user.id, l)
 
 @dp.message(F.photo)  # mijoz chek yuboradi -> adminga
 async def receipt(m: Message):
@@ -576,6 +613,7 @@ async def mw(req, handler):
                 u = check_init(req.headers.get("X-Init", ""))
                 if not u: return web.json_response({"error": "auth"}, status=401, headers=cors())
                 req["u"] = D.user(u["id"], u.get("first_name", "")); req["tg"] = u
+                if not has_phone(u["id"]): return web.json_response({"error": "phone"}, status=403, headers=cors())
                 miss = await sub_missing(u["id"])
                 if miss: return web.json_response({"error": "sub", "channels": [{"name": x["name"], "url": x["url"]} for x in miss]}, status=403, headers=cors())
                 # so'rovlar cheklovi: umumiy 60/daq, buyurtma/to'lov 12/daq
