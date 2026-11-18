@@ -35,6 +35,9 @@ try: db.execute("ALTER TABLE users ADD COLUMN lang_set INTEGER DEFAULT 0")
 except sqlite3.OperationalError: pass
 try: db.execute("ALTER TABLE users ADD COLUMN phone TEXT DEFAULT ''")
 except sqlite3.OperationalError: pass
+for _c, _t in (("username", "TEXT DEFAULT ''"), ("blocked", "INTEGER DEFAULT 0"), ("joined", "TEXT")):
+    try: db.execute(f"ALTER TABLE users ADD COLUMN {_c} {_t}")
+    except sqlite3.OperationalError: pass
 for _c, _t in (("text", "TEXT DEFAULT ''"), ("reply", "TEXT DEFAULT ''"), ("ts", "TEXT")):
     try: db.execute(f"ALTER TABLE ratings ADD COLUMN {_c} {_t}")
     except sqlite3.OperationalError: pass
@@ -50,7 +53,7 @@ def user(uid, name="", inviter=None):
     if not u:
         inv = q("SELECT id FROM users WHERE ref=?", (inviter,)).fetchone() if inviter else None
         inv = inv["id"] if inv and inv["id"] != uid else None
-        q("INSERT INTO users(id,name,ref,invited_by) VALUES(?,?,?,?)", (uid, name, secrets.token_urlsafe(6).upper(), inv))
+        q("INSERT INTO users(id,name,ref,invited_by,joined) VALUES(?,?,?,?,datetime('now'))", (uid, name, secrets.token_urlsafe(6).upper(), inv))
         u = q("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
     return u
 MAX_TOPUPS = 1   # javob berilmagan balans to'ldirish so'rovlari chegarasi

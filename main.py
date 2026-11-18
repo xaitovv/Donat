@@ -8,7 +8,7 @@ logging.basicConfig(level=logging.INFO)
 import asyncio, base64, hmac, hashlib, json, time
 from urllib.parse import parse_qsl
 from aiohttp import web
-from aiogram import Bot, Dispatcher, F
+from aiogram import Bot, Dispatcher, F, BaseMiddleware
 from aiogram.filters import Command, CommandStart, CommandObject
 from aiogram.types import (Message, CallbackQuery, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
                            InlineKeyboardButton, WebAppInfo, BufferedInputFile, FSInputFile, InputMediaDocument)
@@ -18,6 +18,9 @@ import config as C, database as D, donatix as DX, persist
 for _s in ("CREATE TABLE IF NOT EXISTS ratings(oid INTEGER PRIMARY KEY,uid INTEGER,stars INTEGER)",
            "ALTER TABLE users ADD COLUMN lang_set INTEGER DEFAULT 0",
            "ALTER TABLE users ADD COLUMN phone TEXT DEFAULT ''",
+           "ALTER TABLE users ADD COLUMN username TEXT DEFAULT ''",
+           "ALTER TABLE users ADD COLUMN blocked INTEGER DEFAULT 0",
+           "ALTER TABLE users ADD COLUMN joined TEXT",
            "ALTER TABLE orders ADD COLUMN game TEXT DEFAULT ''",
            "ALTER TABLE orders ADD COLUMN item TEXT DEFAULT ''",
            "ALTER TABLE ratings ADD COLUMN text TEXT DEFAULT ''",
@@ -141,6 +144,37 @@ async def chksub(c: CallbackQuery):
     if not has_phone(c.from_user.id): return await ask_phone(c.from_user.id, l)
     await welcome(c.from_user.id, l)
 
+
+# ---------- AKKAUNTNI QULFLASH (faqat admin qo'yadi) ----------
+_BLK = {
+ "uz": "🚫 <b>Sizning akkauntingiz qulflangan.</b>\nBotdan foydalanish cheklangan. Xato bo'lgan bo'lsa, yordamga yozing.",
+ "tg": "🚫 <b>Ҳисоби шумо қулф карда шудааст.</b>\nИстифодаи бот маҳдуд карда шудааст. Агар хато бошад, ба дастгирӣ нависед.",
+ "ru": "🚫 <b>Ваш аккаунт заблокирован.</b>\nИспользование бота ограничено. Если это ошибка, напишите в поддержку.",
+ "en": "🚫 <b>Your account has been locked.</b>\nAccess to the bot is restricted. If this is a mistake, contact support.",
+}
+def blk_text(uid, plain=False):
+    r = D.q("SELECT lang FROM users WHERE id=?", (uid,)).fetchone()
+    l = r["lang"] if r and r["lang"] in _BLK else "ru"
+    return re.sub(r"<[^>]+>", "", _BLK[l]) if plain else _BLK[l]
+def is_blocked(uid):
+    if uid == C.ADMIN_ID: return False
+    r = D.q("SELECT blocked FROM users WHERE id=?", (uid,)).fetchone()
+    return bool(r and r["blocked"])
+class BlockMW(BaseMiddleware):
+    """Har bir xabar/tugma oldidan: username'ni yangilaydi, qulflangan mijozni o'z tilida ogohlantirib to'xtatadi."""
+    async def __call__(self, handler, event, data):
+        u = getattr(event, "from_user", None)
+        if u and not u.is_bot:
+            try: D.q("UPDATE users SET username=? WHERE id=? AND COALESCE(username,'')!=?", (u.username or "", u.id, u.username or ""))
+            except Exception: pass
+            if is_blocked(u.id):
+                try:
+                    if isinstance(event, CallbackQuery): await event.answer(blk_text(u.id, True), show_alert=True)
+                    else: await event.answer(blk_text(u.id), parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
+                except Exception: pass
+                return
+        return await handler(event, data)
+dp.message.outer_middleware(BlockMW()); dp.callback_query.outer_middleware(BlockMW())
 
 # ---------- MAJBURIY TELEFON RAQAM ----------
 _PH = {
@@ -613,6 +647,9 @@ async def mw(req, handler):
                 u = check_init(req.headers.get("X-Init", ""))
                 if not u: return web.json_response({"error": "auth"}, status=401, headers=cors())
                 req["u"] = D.user(u["id"], u.get("first_name", "")); req["tg"] = u
+                if u["id"] != C.ADMIN_ID:
+                    if (u.get("username") or "") != (req["u"]["username"] or ""): D.q("UPDATE users SET username=? WHERE id=?", (u.get("username") or "", u["id"]))
+                    if req["u"]["blocked"]: return web.json_response({"error": "blocked", "msg": blk_text(u["id"], True)}, status=403, headers=cors())
                 if not has_phone(u["id"]): return web.json_response({"error": "phone"}, status=403, headers=cors())
                 miss = await sub_missing(u["id"])
                 if miss: return web.json_response({"error": "sub", "channels": [{"name": x["name"], "url": x["url"]} for x in miss]}, status=403, headers=cors())
@@ -1490,6 +1527,51 @@ async def avatar(r):
     data = open(path, "rb").read()
     if not data: return web.Response(status=404)
     return web.Response(body=data, content_type="image/jpeg", headers={"Cache-Control": "public, max-age=3600"})
+
+# ---------- ADMIN: MIJOZLAR RO'YXATI VA QULFLASH ----------
+async def admin_users(r):
+    if not _admin(r): return web.json_response({"error": "forbidden"}, status=403)
+    q = (r.query.get("q") or "").strip().lower().lstrip("@")[:40]
+    flt = r.query.get("flt", ""); sort = r.query.get("sort", "new")
+    w, a = [], []
+    if q:
+        w.append("(lower(u.name) LIKE ? OR lower(u.username) LIKE ? OR CAST(u.id AS TEXT) LIKE ? OR u.phone LIKE ?)"); a += [f"%{q}%"] * 4
+    if flt == "blocked": w.append("u.blocked=1")
+    elif flt == "nophone": w.append("COALESCE(u.phone,'')=''")
+    order = {"bal": "u.balance DESC", "spent": "u.spent DESC"}.get(sort, "COALESCE(u.joined,'') DESC, u.rowid DESC")
+    rows = D.q("SELECT u.*, (SELECT COUNT(*) FROM orders o WHERE o.uid=u.id AND o.status='done') oc FROM users u " + ("WHERE " + " AND ".join(w) if w else "") + f" ORDER BY {order} LIMIT 300", a).fetchall()
+    st = D.q("SELECT COUNT(*) n, COALESCE(SUM(balance),0) bal, COALESCE(SUM(spent),0) sp, COALESCE(SUM(blocked),0) bl, COALESCE(SUM(CASE WHEN COALESCE(phone,'')!='' THEN 1 ELSE 0 END),0) ph FROM users").fetchone()
+    users = [{"id": x["id"], "name": x["name"] or "", "username": x["username"] or "", "phone": x["phone"] or "", "balance": round(x["balance"], 2), "spent": round(x["spent"], 2),
+              "lang": x["lang"], "blocked": bool(x["blocked"]), "joined": to_local(x["joined"]) if x["joined"] else "", "oc": x["oc"], "av": av_tok(x["id"])} for x in rows]
+    return web.json_response({"ok": True, "users": users, "shown": len(users), "stats": {"total": st["n"], "balance": round(st["bal"], 2), "spent": round(st["sp"], 2), "blocked": st["bl"], "phones": st["ph"]}})
+async def admin_user(r):
+    if not _admin(r): return web.json_response({"error": "forbidden"}, status=403)
+    try: uid = int(r.query.get("id", ""))
+    except ValueError: return web.json_response({"ok": False})
+    x = D.q("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+    if not x: return web.json_response({"ok": False})
+    bio = full = ""
+    try:
+        ch = await bot.get_chat(uid); bio = getattr(ch, "bio", "") or ""; full = " ".join(p for p in (ch.first_name, ch.last_name) if p)
+    except Exception: pass
+    orders = [{"id": o["id"], "title": o["title"], "price": o["price"], "status": o["status"], "ts": to_local(o["ts"])} for o in D.q("SELECT * FROM orders WHERE uid=? ORDER BY id DESC LIMIT 10", (uid,)).fetchall()]
+    tops = [{"id": t["id"], "amount": t["amount"], "status": t["status"], "method": t["method"] or "", "ts": to_local(t["ts"])} for t in D.q("SELECT * FROM topups WHERE uid=? ORDER BY id DESC LIMIT 10", (uid,)).fetchall()]
+    tot = D.q("SELECT COALESCE(SUM(amount),0) s FROM topups WHERE uid=? AND status='done'", (uid,)).fetchone()["s"]
+    refs = D.q("SELECT COUNT(*) c FROM users WHERE invited_by=?", (uid,)).fetchone()["c"]
+    oc = D.q("SELECT COUNT(*) c FROM orders WHERE uid=? AND status='done'", (uid,)).fetchone()["c"]
+    inv = D.q("SELECT id, name, username FROM users WHERE id=?", (x["invited_by"],)).fetchone() if x["invited_by"] else None
+    return web.json_response({"ok": True, "u": {"id": x["id"], "name": x["name"] or "", "full": full, "username": x["username"] or "", "bio": bio, "phone": x["phone"] or "", "lang": x["lang"],
+        "balance": round(x["balance"], 2), "spent": round(x["spent"], 2), "bonus": round(x["bonus"] or 0, 2), "topups_total": round(tot, 2), "refs": refs, "oc": oc, "blocked": bool(x["blocked"]),
+        "joined": to_local(x["joined"]) if x["joined"] else "", "invited_by": ({"id": inv["id"], "name": inv["name"] or "", "username": inv["username"] or ""} if inv else None), "av": av_tok(x["id"])},
+        "orders": orders, "topups": tops})
+async def admin_block(r):
+    if not _admin(r): return web.json_response({"error": "forbidden"}, status=403)
+    try: b = await r.json(); uid = int(b.get("id")); val = 1 if b.get("blocked") else 0
+    except Exception: return web.json_response({"ok": False, "msg": "bad"})
+    if uid == C.ADMIN_ID: return web.json_response({"ok": False, "msg": "Adminni qulflab bo'lmaydi"})
+    if not D.q("SELECT 1 FROM users WHERE id=?", (uid,)).fetchone(): return web.json_response({"ok": False, "msg": "Mijoz topilmadi"})
+    D.q("UPDATE users SET blocked=? WHERE id=?", (val, uid))
+    return web.json_response({"ok": True, "blocked": bool(val)})
 async def reviews(r):
     rows = D.q("SELECT r.oid, r.stars, r.text, r.reply, r.ts, o.game, o.item, o.title, u.name, u.id uid FROM ratings r JOIN orders o ON o.id=r.oid JOIN users u ON u.id=r.uid ORDER BY r.oid DESC LIMIT 300").fetchall()
     dt = lambda s: f"{s[8:10]}.{s[5:7]}.{s[:4]}" if s else ""
@@ -1544,7 +1626,7 @@ async def main():
     app = web.Application(middlewares=[mw], client_max_size=8 * 1024 * 1024)
     app.on_response_prepare.append(_sec)
     app.add_routes([web.get("/api/catalog", catalog), web.get("/api/me", me), web.post("/api/lang", lang), web.post("/api/order", order),
-                    web.post("/api/topup", topup), web.post("/api/receipt", receipt_api), web.get("/api/history", history), web.get("/api/top", top_api), web.get("/api/checkid", checkid), web.get("/api/admin/games", admin_games), web.get("/api/admin/game", admin_game_api), web.post("/api/admin/save", admin_save), web.post("/api/admin/info", admin_info_save), web.get("/gi/{g}/{p}", info_img), web.get("/api/reviews", reviews), web.route("OPTIONS", "/{p:.*}", lambda r: web.Response()),
+                    web.post("/api/topup", topup), web.post("/api/receipt", receipt_api), web.get("/api/history", history), web.get("/api/top", top_api), web.get("/api/checkid", checkid), web.get("/api/admin/games", admin_games), web.get("/api/admin/users", admin_users), web.get("/api/admin/user", admin_user), web.post("/api/admin/block", admin_block), web.get("/api/admin/game", admin_game_api), web.post("/api/admin/save", admin_save), web.post("/api/admin/info", admin_info_save), web.get("/gi/{g}/{p}", info_img), web.get("/api/reviews", reviews), web.route("OPTIONS", "/{p:.*}", lambda r: web.Response()),
                     web.get("/", lambda r: web.FileResponse(os.path.join(HERE, "index.html")))])
     for f in ("style.css", "app.js", "i18n.js", "ru.json", "uz.json", "tg.json", "en.json", "logo.png", "splash.jpg"):
         app.router.add_get("/" + f, lambda r, f=f: web.FileResponse(os.path.join(HERE, f)))
