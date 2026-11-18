@@ -238,7 +238,11 @@ async def pick_lang(c: CallbackQuery):
 @dp.message(F.photo)  # mijoz chek yuboradi -> adminga
 async def receipt(m: Message):
     t = D.q("SELECT id FROM topups WHERE uid=? AND status='pending' ORDER BY id DESC", (m.from_user.id,)).fetchone()
-    if not t: return await m.answer("—")
+    if not t or not has_phone(m.from_user.id): return await m.answer("—")
+    fu = "tg:" + m.photo[-1].file_unique_id
+    if D.rhash_get(fu) or D.q("SELECT 1 FROM rhash WHERE tid=?", (t["id"],)).fetchone():   # bu chek ishlatilgan yoki bu so'rovga chek allaqachon yuborilgan
+        return await m.answer("⚠️ Chek allaqachon yuborilgan / Чек уже отправлен")
+    D.rhash_add(fu, t["id"])
     kb = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="✅", callback_data=f"ok{t['id']}"),
         InlineKeyboardButton(text="❌", callback_data=f"no{t['id']}")]])
@@ -579,6 +583,8 @@ async def backup_db(force=False):
     if BK.get("blocked") and not force: return False
     if not force and (ch == BK["changes"] or time.time() - BK["t"] < 8): return False
     path = "/tmp/diavex-backup.db"; D.snapshot(path)
+    try: os.chmod(path, 0o600)
+    except Exception: pass
     name = "diavex-backup-" + datetime.now(timezone(timedelta(hours=C.TZ_HOURS))).strftime("%Y%m%d-%H%M") + ".db"
     cap = "💾 Baza zaxirasi. O'chirmang va qadalgan holda qoldiring: server qayta ishga tushganda balans va buyurtmalar shundan tiklanadi."
     mid = BK["mid"]
@@ -630,13 +636,16 @@ def check_init(raw: str):
         s = "\n".join(f"{k}={v}" for k, v in sorted(d.items()))
         key = hmac.new(b"WebAppData", C.BOT_TOKEN.encode(), hashlib.sha256).digest()
         if not hmac.compare_digest(hmac.new(key, s.encode(), hashlib.sha256).hexdigest(), h): return None
-        if time.time() - int(d["auth_date"]) > 86400: return None
-        return json.loads(d["user"])
+        if time.time() - int(d["auth_date"]) > 3600: return None   # 1 soat: initData oqib ketsa (ekran yozib olish va h.k.), qalbakilashtirib ishlatish muddati qisqa
+        u = json.loads(d["user"])
+        return u if isinstance(u, dict) and isinstance(u.get("id"), int) and not u.get("is_bot") else None
     except Exception: return None
 
-hits = {}; whits = {}
+hits = {}; whits = {}; bad_auth = {}; cat_hits = {}
 def _rl(store, k, lim):
-    now = time.time(); store[k] = [x for x in store.get(k, []) if now - x < 60] + [now]
+    now = time.time()
+    if len(store) > 20000: store.clear()   # xotira to'lib ketmasin
+    store[k] = [x for x in store.get(k, []) if now - x < 60] + [now]
     return len(store[k]) > lim
 
 # ---------- IKKI MARTA O'TISHDAN HIMOYA (ikki marta bosish, VPN/tarmoq takrori) ----------
@@ -671,19 +680,25 @@ async def mw(req, handler):
     try:
         if req.method == "OPTIONS": r = web.Response()
         else:
+            if req.path == "/api/catalog":   # ro'yxatdan o'tmagan ham ochadi, shuning uchun IP bo'yicha cheklanadi (bepul DoS yo'li bo'lmasin)
+                ip = (req.headers.get("X-Forwarded-For", "").split(",")[0].strip() or req.remote or "?")[:45]
+                if _rl(cat_hits, ip, 90): return web.json_response({"error": "rate"}, status=429, headers=cors())
             if req.path.startswith("/api/") and req.path != "/api/catalog":
                 u = check_init(req.headers.get("X-Init", ""))
-                if not u: return web.json_response({"error": "auth"}, status=401, headers=cors())
+                if not u:
+                    ip = (req.headers.get("X-Forwarded-For", "").split(",")[0].strip() or req.remote or "?")[:45]
+                    if _rl(bad_auth, ip, 40): return web.json_response({"error": "rate"}, status=429, headers=cors())   # soxta initData bilan urinishlar
+                    return web.json_response({"error": "auth"}, status=401, headers=cors())
                 req["u"] = D.user(u["id"], u.get("first_name", "")); req["tg"] = u
                 if u["id"] != C.ADMIN_ID:
                     if (u.get("username") or "") != (req["u"]["username"] or ""): D.q("UPDATE users SET username=? WHERE id=?", (u.get("username") or "", u["id"]))
                     if req["u"]["blocked"]: return web.json_response({"error": "blocked", "msg": blk_text(u["id"], True)}, status=403, headers=cors())
                 if not has_phone(u["id"]): return web.json_response({"error": "phone"}, status=403, headers=cors())
-                miss = await sub_missing(u["id"])
-                if miss: return web.json_response({"error": "sub", "channels": [{"name": x["name"], "url": x["url"]} for x in miss]}, status=403, headers=cors())
-                # so'rovlar cheklovi: umumiy 60/daq, buyurtma/to'lov 12/daq
+                # so'rovlar cheklovi (obuna tekshiruvidan oldin): umumiy 120/daq, buyurtma/to'lov 12/daq
                 if u["id"] != C.ADMIN_ID and (_rl(hits, u["id"], 120) or (req.method == "POST" and _rl(whits, u["id"], 12))):
                     return web.json_response({"error": "rate"}, status=429, headers=cors())
+                miss = await sub_missing(u["id"])
+                if miss: return web.json_response({"error": "sub", "channels": [{"name": x["name"], "url": x["url"]} for x in miss]}, status=403, headers=cors())
             r = await (guarded(req, handler) if (req.method == "POST" and req.path in GUARD and "u" in req) else handler(req))
     except web.HTTPException: raise
     except Exception:
@@ -693,10 +708,24 @@ async def mw(req, handler):
 def cors():
     if not C.ORIGIN or C.ORIGIN == "*": return {}   # Mini App shu serverning o'zida, CORS kerak emas
     return {"Access-Control-Allow-Origin": C.ORIGIN, "Access-Control-Allow-Headers": "Content-Type,X-Init,X-Rid", "Access-Control-Allow-Methods": "GET,POST,OPTIONS"}
+CSP = ("default-src 'self'; script-src 'self' 'unsafe-inline' https://telegram.org; style-src 'self' 'unsafe-inline'; "
+       "img-src 'self' data: blob: https:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; "
+       "frame-ancestors https://web.telegram.org https://*.telegram.org https://t.me")
 async def _sec(req, resp):
-    resp.headers["X-Content-Type-Options"] = "nosniff"; resp.headers["Referrer-Policy"] = "no-referrer"
+    h = resp.headers
+    h["X-Content-Type-Options"] = "nosniff"; h["Referrer-Policy"] = "no-referrer"
+    h["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    h["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), payment=()"
+    h["Cross-Origin-Opener-Policy"] = "same-origin"
+    if req.path == "/" or req.path.endswith(".html"): h["Content-Security-Policy"] = CSP
+    if req.path.startswith("/api/"): h["Cache-Control"] = "no-store"   # balans va shaxsiy ma'lumotlar keshda qolmasin
 
-async def catalog(r): return web.json_response({**C.CATALOG, "games": public_catalog(), "bot": (await bot.me()).username, "support": C.SUPPORT, "rate": C.RATE, "pay": [{k: x[k] for k in ("id", "name", "type", "cur", "color", "icon")} for x in C.PAY]})
+_CAT_CACHE = {"t": 0, "v": None}
+async def catalog(r):
+    if time.time() - _CAT_CACHE["t"] > 3:   # 3 soniya kesh: ro'yxatdan o'tmagan oqim bazani va Telegram API'ni har safar urmasin
+        _CAT_CACHE["v"] = {**C.CATALOG, "games": public_catalog(), "bot": (await bot.me()).username, "support": C.SUPPORT, "rate": C.RATE, "pay": [{k: x[k] for k in ("id", "name", "type", "cur", "color", "icon")} for x in C.PAY]}
+        _CAT_CACHE["t"] = time.time()
+    return web.json_response(_CAT_CACHE["v"])
 async def me(r):
     u = r["u"]; n = D.q("SELECT COUNT(*) c FROM users WHERE invited_by=?", (u["id"],)).fetchone()["c"]
     b = D.q("SELECT COUNT(*) c FROM users WHERE invited_by=? AND paid=1", (u["id"],)).fetchone()["c"]
@@ -1186,11 +1215,24 @@ async def dx_icons():
             st, d = await DX.call("GET", "/products/" + urllib.parse.quote(str(prods[0]["product_id"])))
             sample += f"\nmahsulot HTTP {st}: " + json.dumps(d, ensure_ascii=False)[:700]
     return ok, tot, sample
+import socket, ipaddress
+def _public_https(url):
+    """Faqat https va faqat ochiq (internet) manzillar: ichki tarmoq/localhost/metadata manzillariga so'rov yuborilmaydi (SSRF)."""
+    pu = urllib.parse.urlparse(url)
+    if pu.scheme != "https" or not pu.hostname: raise ValueError("faqat https")
+    for ai in socket.getaddrinfo(pu.hostname, pu.port or 443, proto=socket.IPPROTO_TCP):
+        ip = ipaddress.ip_address(ai[4][0])
+        if not ip.is_global: raise ValueError("ichki manzil taqiqlangan")
+class _SafeRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        _public_https(newurl); return super().redirect_request(req, fp, code, msg, headers, newurl)
+ICO_OK = {"image/png", "image/jpeg", "image/webp", "image/gif"}   # svg va boshqalar taqiqlanadi (skript bo'lishi mumkin)
 def _dl_icon(url, path):
+    _public_https(url)
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (compatible; DiavexBot/1.0)", "Accept": "image/*"})
-    with urllib.request.urlopen(req, timeout=15) as r:
-        data = r.read(2_000_001); ct = r.headers.get("Content-Type", "image/png").split(";")[0]
-    if len(data) > 2_000_000 or not ct.startswith("image/"): raise ValueError("rasm emas")
+    with urllib.request.build_opener(_SafeRedirect).open(req, timeout=15) as r:
+        data = r.read(2_000_001); ct = r.headers.get("Content-Type", "image/png").split(";")[0].strip().lower()
+    if len(data) > 2_000_000 or ct not in ICO_OK: raise ValueError("rasm emas")
     os.makedirs(ICO_DIR, exist_ok=True)
     open(path, "wb").write(data); open(path + ".ct", "w").write(ct)
 async def ico(r):
@@ -1205,8 +1247,9 @@ async def ico(r):
     if not os.path.exists(path):
         try: await asyncio.to_thread(_dl_icon, u, path)
         except Exception: logging.warning("icon %s: yuklab bo'lmadi", gid); return web.Response(status=404)
-    ct = open(path + ".ct").read() if os.path.exists(path + ".ct") else "image/png"
-    return web.Response(body=open(path, "rb").read(), content_type=ct, headers={"Cache-Control": "public, max-age=604800"})
+    ct = open(path + ".ct").read().strip() if os.path.exists(path + ".ct") else "image/png"
+    if ct not in ICO_OK: return web.Response(status=404)
+    return web.Response(body=open(path, "rb").read(), content_type=ct, headers={"Cache-Control": "public, max-age=604800", "Content-Security-Policy": "default-src 'none'; sandbox"})
 @dp.message(Command("dxids"))
 async def dx_ids(m: Message, command: CommandObject):
     if m.from_user.id != C.ADMIN_ID: return
@@ -1465,7 +1508,7 @@ async def order(r):
 
 async def topup(r):
     d = await r.json()
-    try: a = float(d.get("amount", 0))
+    try: a = round(float(d.get("amount", 0)), 2)
     except Exception: a = 0
     x = next((p for p in C.PAY if p["id"] == d.get("method")), None)
     if not x or not 10 <= a <= 5000: return web.json_response({"error": "bad"})
@@ -1499,13 +1542,21 @@ def ai_report(res, want, value):
     return ("🤖 <b>AI tekshiruv:</b> " + ("⚠ <b>shubhali</b>" if warn else "✅ <b>mos keladi</b>")) + ("\n" + "\n".join(L) if L else "") + ("\n<i>Chekda: " + "; ".join(info) + "</i>" if info else "")
 async def rcpt_ai_task(tid, msg_id, cap, kb, raw, want, value):
     try:
-        txt = ai_report(await AI.analyze(raw, "image/png" if raw[:4] == b"\x89PNG" else "image/jpeg"), want, value)
+        res = await AI.analyze(raw, "image/png" if raw[:4] == b"\x89PNG" else "image/jpeg")
+        txt = ai_report(res, want, value)
+        try:   # xuddi shu chekning boshqa rasmi (qayta saqlangan/tahrirlangan) avval ishlatilganmi?
+            if res and isinstance(res.get("amount"), (int, float)) and res.get("date"):
+                fp = "ai:" + re.sub(r"\s+", " ", f"{float(res['amount']):g}|{res['date']}|{res.get('sender') or ''}|{res.get('recipient') or ''}".lower())[:200]
+                old_t = D.rhash_get(fp)
+                if old_t and old_t != tid: txt += f"\n🚨 <b>DIQQAT: chekdagi summa, sana va ism avval #{old_t} to'lovda ishlatilgan. Bu takroriy chek bo'lishi mumkin!</b>"
+                else: D.rhash_add(fp, tid)
+        except Exception: logging.exception("receipt dup check")
         t = D.q("SELECT status FROM topups WHERE id=?", (tid,)).fetchone()
         await bot.edit_message_caption(chat_id=C.ADMIN_ID, message_id=msg_id, caption=cap + "\n\n" + txt, parse_mode="HTML", reply_markup=kb if (t and t["status"] == "pending") else None)
     except Exception: logging.exception("rcpt_ai_task")
 async def receipt_api(r):
     d = await r.json(); uid = r["u"]["id"]; tg = r["tg"]
-    try: a = float(d.get("amount", 0))
+    try: a = round(float(d.get("amount", 0)), 2)
     except Exception: a = 0
     x = next((p for p in C.PAY if p["id"] == d.get("method")), None)
     try: raw = base64.b64decode(str(d.get("image", "")).split(",")[-1], validate=True)
