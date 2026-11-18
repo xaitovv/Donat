@@ -66,11 +66,13 @@ def _pending(uid, kind):
 def has_pending(uid, kind="topup"):
     with _l: return _pending(uid, kind) >= (MAX_TOPUPS if kind == "topup" else MAX_ORDERS)
 def buy(uid, title, pid, price, game="", item="", fields="", qty=1):
-    """Atomik: -1 = tasdiqlanmagan so'rov bor, None = mablag' yetarli emas, aks holda buyurtma raqami."""
+    """Atomik: -1 = tasdiqlanmagan so'rov bor, -2 = xuddi shu buyurtma hozirgina berilgan, None = mablag' yetarli emas, aks holda buyurtma raqami."""
     with _l:
         db.execute("BEGIN IMMEDIATE")
         if _pending(uid, "order") >= MAX_ORDERS:
             db.execute("ROLLBACK"); return -1
+        if db.execute("SELECT 1 FROM orders WHERE uid=? AND title=? AND pid=? AND price=? AND status!='cancelled' AND ts > datetime('now','-15 seconds')", (uid, title, pid, price)).fetchone():
+            db.execute("ROLLBACK"); return -2   # xuddi shu buyurtma hozirgina yuborilgan (ikki marta bosish / VPN takrori)
         r = db.execute("UPDATE users SET balance=balance-?,spent=spent+? WHERE id=? AND balance>=?", (price, price, uid, price))
         if r.rowcount == 0:
             db.execute("ROLLBACK"); return None

@@ -3,7 +3,10 @@ const T0=Date.now();
 const tg=window.Telegram?.WebApp;tg?.ready();tg?.expand();
 const $=s=>document.querySelector(s);
 const S={u:{balance:0,spent:0,ref:"",refs:0,bonus:0},cat:{games:[],bot:"",support:""},tab:"games",view:"menu",game:null,sel:null,pid:"",region:"",hist:{orders:[],fin:[]},htab:"orders"};
-async function api(p,b){try{const r=await fetch(API+p,{method:b?"POST":"GET",headers:{"Content-Type":"application/json","X-Init":tg?.initData||""},body:b?JSON.stringify(b):undefined});let j=await r.json();if(!b&&j&&(j.error=="rate"||j.error=="server")){await new Promise(z=>setTimeout(z,1200));j=await (await fetch(API+p,{headers:{"X-Init":tg?.initData||""}})).json()}if(j&&j.error=="sub"&&!S.locked)lock(j.channels);if(j&&j.error=="phone"&&!S.locked)lockPhone();if(j&&j.error=="blocked"&&!S.locked)lockBlocked(j.msg);return j}catch(e){return null}}
+const GRD=["/api/order","/api/topup","/api/receipt"],INFL={};
+const rid=()=>(crypto.randomUUID?crypto.randomUUID():Date.now()+"-"+Math.random().toString(36).slice(2));
+async function api(p,b){const g=b&&GRD.includes(p);if(g){if(INFL[p])return{error:"busy"};INFL[p]=1}   // ikki marta bosish: oldingi so'rov tugamaguncha yangisi yuborilmaydi
+  try{const r=await fetch(API+p,{method:b?"POST":"GET",headers:{"Content-Type":"application/json","X-Init":tg?.initData||"",...(g?{"X-Rid":rid()}:{})},body:b?JSON.stringify(b):undefined});let j=await r.json();if(!b&&j&&(j.error=="rate"||j.error=="server")){await new Promise(z=>setTimeout(z,1200));j=await (await fetch(API+p,{headers:{"X-Init":tg?.initData||""}})).json()}if(j&&j.error=="sub"&&!S.locked)lock(j.channels);if(j&&j.error=="phone"&&!S.locked)lockPhone();if(j&&j.error=="blocked"&&!S.locked)lockBlocked(j.msg);return j}catch(e){return null}finally{if(g)delete INFL[p]}}
 const SUBT={uz:["Obuna bo'ling","Ilovadan foydalanish uchun quyidagi kanallarga obuna bo'ling","✅ Tekshirish","Siz hali hamma kanalga obuna bo'lmagansiz!"],tg:["Обуна шавед","Барои истифодаи барнома ба каналҳои зерин обуна шавед","✅ Тафтиш","Шумо ҳанӯз ба ҳамаи каналҳо обуна нашудаед!"],ru:["Подпишитесь","Чтобы пользоваться приложением, подпишитесь на каналы ниже","✅ Проверить","Вы ещё не подписались на все каналы!"],en:["Subscribe","Please subscribe to the channels below to use the app","✅ Check","You haven't subscribed to all channels yet!"]};
 function lock(chs){S.locked=true;const s=SUBT[LANG]||SUBT.ru;$("#splash").classList.add("hide");$("#nav").style.display="none";if(tg)tg.BackButton.hide();
   $("#app").innerHTML=`<div style="padding:40px 16px;text-align:center"><div style="font-size:56px">🔒</div><h2 style="margin:12px 0 6px">${s[0]}</h2><p style="color:var(--mut);margin:0 0 20px">${s[1]}</p>`+(chs||[]).map(c=>`<a class="btn" style="display:block;margin-bottom:10px;text-decoration:none;box-sizing:border-box" href="${esc(c.url)}" onclick="event.preventDefault();openCh('${esc(c.url)}')">📢 ${esc(c.name)}</a>`).join("")+`<button class="btn" style="margin-top:10px;background:#16a34a" onclick="unlock()">${s[2]}</button></div>`}
@@ -125,6 +128,7 @@ function fundsModal(need,bal){const o=document.createElement("div");o.style.cssT
 const pendModal=()=>modal(t("pend_title"),t("pend_body"),t("gotit"),()=>go("hist"),'<span style="font-size:68px;line-height:1">⏳</span>',"#f59e0b24");
 async function buy(){const g=S.game,bt=document.querySelector(".buy .btn");if(bt)bt.disabled=true;
   const r=await api("/api/order",{game:g.id,item:g.stars?g.stars.id:S.sel,fields:S.fv,region:S.region,qty:S.qty,pid:Object.values(S.fv)[0],ack:!!(S.ack1&&S.ack2)});
+  if(r?.error=="busy")return;   // takroriy bosish: birinchi so'rov natijasi ko'rsatiladi
   if(r?.error=="pending"){if(bt)bt.disabled=false;return pendModal()}
   if(r?.error=="noid"){S.checked=false;S.nick="";S.idmsg="noid";return render()}
   if(r?.error=="funds"){if(bt)bt.disabled=false;return fundsModal(r.need,r.balance)}
@@ -151,7 +155,7 @@ function toMeth(){if(!(S.amt>=10))return alert(t("min")+" 10 "+t("cur"));go("met
 function meth(){const rows=(S.cat.pay||[]).map(m=>{const amt=m.cur=="RUB"?Math.round(S.amt/rate())+" ₽":fmt(S.amt)+" "+t("cur");
   return `<div class="card" style="display:flex;justify-content:space-between;align-items:center;padding:14px 16px" onclick="pickM('${m.id}')"><div class="flex" style="align-items:center"><div class="av" style="background:${m.color};border-radius:14px;position:relative">${pi(m.id)}${m.icon}</div><div><b>${m.name}</b><br><small style="color:var(--mut)">${t(m.type=="card"?"bycard":"byphone")}</small></div></div><div style="text-align:right"><b style="color:#8b7bff">${amt}</b> ›</div></div>`}).join("");
   return `<a style="color:#8b7bff;font-weight:600" onclick="go('topup')">‹ ${t("changeamt")}</a><div class="lbl" style="margin-top:18px">${t("paymethod")}</div>${rows||`<p style="color:var(--mut)">—</p>`}`}
-async function pickM(id){const r=await api("/api/topup",{amount:S.amt,method:id});if(r?.ok){S.pay=r;S.file=null;go("pay")}else if(r?.error=="pending")pendModal();else alert(t("err"))}
+async function pickM(id){const r=await api("/api/topup",{amount:S.amt,method:id});if(r?.error=="busy")return;if(r?.ok){S.pay=r;S.file=null;go("pay")}else if(r?.error=="pending")pendModal();else alert(t("err"))}
 function payv(){const p=S.pay||{};
   return `<a style="color:#8b7bff;font-weight:600" onclick="go('meth')">‹ ${t("changemeth")}</a>
   <div class="card" style="margin-top:14px;text-align:center"><div class="lbl">${t("payto")}</div><div class="av" style="background:${p.color};border-radius:22px;width:96px;height:96px;margin:6px auto 14px;font-size:30px;position:relative">${pi(p.method)}${p.icon}</div>
@@ -164,6 +168,7 @@ function pickF(el){const f=el.files[0];if(!f)return;if(f.size>5*1024*1024)return
 function toJpeg(f){return new Promise((ok,no)=>{const im=new Image();im.onload=()=>{const k=Math.min(1,1280/Math.max(im.width,im.height)),c=document.createElement("canvas");c.width=im.width*k;c.height=im.height*k;c.getContext("2d").drawImage(im,0,0,c.width,c.height);ok(c.toDataURL("image/jpeg",.8))};im.onerror=no;im.src=URL.createObjectURL(f)})}
 async function sendRc(){const b=document.querySelector(".btn");b.disabled=true;
   try{const img=await toJpeg(S.file);const r=await api("/api/receipt",{amount:S.pay.amount,method:S.pay.method,image:img});
+    if(r?.error=="busy")return;
     if(r?.ok){const p=S.pay||{};S.file=null;S.amt=0;showRes({head:t("res_wait")+" ⏳",title:t("rcpt_title"),body:t("rcpt_sent").replace("{a}","<b>"+p.amount+" "+t("cur")+"</b>"),rows:`<div class="lbl" style="text-align:center">${t("paymethod_l")}</div><b style="font-size:20px">${esc(p.name||"")}</b><div style="color:#8b7bff;font-weight:700;margin-top:6px">${p.amount} ${t("cur")}</div>`})}else if(r?.error=="pending"){pendModal();b.disabled=false}else if(r?.error=="dup"){alert(t("dup_rcpt"));b.disabled=false}else{alert(t("err"));b.disabled=false}}catch(e){alert(t("err"));b.disabled=false}}
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 async function openReviews(){const r=await api("/api/reviews");if(r&&r.items)S.rv=r;S.rf={s:0,g:"",o:"new"};go("rev")}

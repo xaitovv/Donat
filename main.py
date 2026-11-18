@@ -638,6 +638,34 @@ hits = {}; whits = {}
 def _rl(store, k, lim):
     now = time.time(); store[k] = [x for x in store.get(k, []) if now - x < 60] + [now]
     return len(store[k]) > lim
+
+# ---------- IKKI MARTA O'TISHDAN HIMOYA (ikki marta bosish, VPN/tarmoq takrori) ----------
+GUARD = ("/api/order", "/api/topup", "/api/receipt")
+BUSY = set(); IDEM = {}   # BUSY: hozir buyurtma/to'lov bajarilayotgan mijozlar; IDEM: (uid, yo'l, X-Rid) -> [vaqt, javob, status]
+async def guarded(req, handler):
+    uid = req["u"]["id"]; now = time.time(); rid = req.headers.get("X-Rid", "")[:64]
+    for k in [k for k, v in IDEM.items() if now - v[0] > 900]: IDEM.pop(k, None)
+    key = (uid, req.path, rid) if rid else None
+    if key and key in IDEM:   # xuddi shu so'rov takrorlandi: yangidan bajarmaymiz, birinchi natijani qaytaramiz
+        ent = IDEM[key]
+        if ent[1] is None: return web.json_response({"error": "busy"}, status=409)
+        return web.Response(text=ent[1], status=ent[2], content_type="application/json")
+    if uid in BUSY: return web.json_response({"error": "busy"}, status=409)   # bitta mijozdan bir vaqtda faqat bitta buyurtma/to'lov
+    BUSY.add(uid)
+    if key: IDEM[key] = [now, None, 0]
+    try:
+        resp = await handler(req)
+        ok = False
+        try: ok = bool(isinstance(resp, web.Response) and resp.status == 200 and json.loads(resp.text).get("ok"))
+        except Exception: pass
+        if key:
+            if ok: IDEM[key] = [now, resp.text, resp.status]
+            else: IDEM.pop(key, None)   # xato bo'lsa qayta urinish mumkin
+        return resp
+    except BaseException:
+        if key: IDEM.pop(key, None)
+        raise
+    finally: BUSY.discard(uid)
 @web.middleware
 async def mw(req, handler):
     try:
@@ -656,7 +684,7 @@ async def mw(req, handler):
                 # so'rovlar cheklovi: umumiy 60/daq, buyurtma/to'lov 12/daq
                 if u["id"] != C.ADMIN_ID and (_rl(hits, u["id"], 120) or (req.method == "POST" and _rl(whits, u["id"], 12))):
                     return web.json_response({"error": "rate"}, status=429, headers=cors())
-            r = await handler(req)
+            r = await (guarded(req, handler) if (req.method == "POST" and req.path in GUARD and "u" in req) else handler(req))
     except web.HTTPException: raise
     except Exception:
         logging.exception("api error: %s", req.path)
@@ -664,7 +692,7 @@ async def mw(req, handler):
     r.headers.update(cors()); return r
 def cors():
     if not C.ORIGIN or C.ORIGIN == "*": return {}   # Mini App shu serverning o'zida, CORS kerak emas
-    return {"Access-Control-Allow-Origin": C.ORIGIN, "Access-Control-Allow-Headers": "Content-Type,X-Init", "Access-Control-Allow-Methods": "GET,POST,OPTIONS"}
+    return {"Access-Control-Allow-Origin": C.ORIGIN, "Access-Control-Allow-Headers": "Content-Type,X-Init,X-Rid", "Access-Control-Allow-Methods": "GET,POST,OPTIONS"}
 async def _sec(req, resp):
     resp.headers["X-Content-Type-Options"] = "nosniff"; resp.headers["Referrer-Policy"] = "no-referrer"
 
@@ -1418,6 +1446,7 @@ async def order(r):
         sku = dx_resolve(iid, rr); fields = {"player_id": pid}   # Donatix'ga bog'langan bo'lsa avto
     oid = D.buy(uid, f"{gname} {product}", pid, price, gname, iname, fj, qty)  # narx serverdan olinadi
     if oid == -1: return web.json_response({"error": "pending"})
+    if oid == -2: return web.json_response({"error": "busy"})   # takroriy so'rov: birinchisi allaqachon o'tgan
     if not oid: return web.json_response({"error": "funds", "need": price, "balance": round(D.user(uid)["balance"], 2)})
     if nick: D.q("UPDATE orders SET nick=? WHERE id=?", (nick, oid))
     full = f"{tg.get('first_name', '')} {tg.get('last_name', '')}".strip() or "—"
