@@ -30,12 +30,12 @@ async function init(){
   render();if(new URLSearchParams(location.search).get("go")=="hist")go("hist");setTimeout(()=>$("#splash").classList.add("hide"),Math.max(0,1500-(Date.now()-T0)))}
 function render(){
   if(S.locked)return;
-  const v=S.view,m={menu,game,topup,meth,hist,friends,set,rev,top:topv,res:resv,adm,admg,adu,adus,pay:payv},sub=["game","topup","meth","pay","rev","res","adm","admg","adu","adus"].includes(v);
+  const v=S.view,m={menu,game,topup,meth,hist,friends,set,rev,top:topv,res:resv,adm:admGuard(adm),admg:admGuard(admg),adu:admGuard(adu),adus:admGuard(adus),ads:admGuard(ads),pay:payv},sub=["game","topup","meth","pay","rev","res","adm","admg","adu","adus","ads"].includes(v);
   $("#app").innerHTML=m[v]();
   $("#nav").style.display=v=="res"?"none":"";
-  $("#nav").innerHTML=NAV.map(([k,i,n])=>`<a class="${v==k||(k=="menu"&&sub)||(k=="friends"&&v=="top")||(k=="set"&&(v=="adm"||v=="admg"||v=="adu"||v=="adus"))?"on":""}" onclick="go('${k}')">${I(i)}<span>${t(n)}</span></a>`).join("");
+  $("#nav").innerHTML=NAV.map(([k,i,n])=>`<a class="${v==k||(k=="menu"&&sub)||(k=="friends"&&v=="top")||(k=="set"&&(v=="adm"||v=="admg"||v=="adu"||v=="adus"||v=="ads"))?"on":""}" onclick="go('${k}')">${I(i)}<span>${t(n)}</span></a>`).join("");
   if(tg)tg.BackButton[(sub||v=="top")?"show":"hide"]()}
-tg?.BackButton.onClick(()=>go(({top:"friends",admg:"adm",adm:"set",adu:"adm",adus:"adu"})[S.view]||"menu"));
+tg?.BackButton.onClick(()=>go(({top:"friends",admg:"adm",adm:"set",adu:"adm",adus:"adu",ads:"adm"})[S.view]||"menu"));
 const bdg=g=>g.dx?'<b class="bdg a">AUTO</b>':g.new?'<b class="bdg n">NEW</b>':"";
 const iu=id=>String(id).startsWith("g_")?`/ico/${id}`:`/${id}.png?v=6`;
 const gi=g=>`<img class="gimg" src="${iu(g.id)}" onerror="this.style.display='none'">`;
@@ -188,6 +188,7 @@ function rev(){const R=S.rv||{items:[],dist:{},count:0,avg:0},f=S.rf||{s:0,g:"",
   <div class="seg" style="margin-top:6px">${[["new","newest"],["best","best"],["worst","worst"]].map(([k,n])=>`<a class="${f.o==k?"on":""}" onclick="setRf('o','${k}')">${t(n)}</a>`).join("")}</div>
   ${cards||`<p style="color:var(--mut);text-align:center;margin-top:40px">${t("noreviews")}</p>`}`}
 const P={
+chart:'<path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20V13"/><path d="M4 20h16"/>',
 grid:'<rect x="4" y="4" width="6.5" height="6.5" rx="1.6"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.6"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.6"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.6"/>',
 hist:'<path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><path d="M3.5 4.5v4.8h4.8"/><path d="M12 7.5V12l3 1.8"/>',
 users:'<circle cx="9" cy="8" r="3.4"/><path d="M2.8 20c0-3.5 2.8-5.8 6.2-5.8s6.2 2.3 6.2 5.8"/><circle cx="17.3" cy="9" r="2.6"/><path d="M17.8 14.3c2.4.3 3.9 2 3.9 4.7"/>',
@@ -228,7 +229,8 @@ function adm(){const A=S.adm||{games:[],settings:{}};
   const all=A.games.map((g,i)=>[g,i]),vis=all.filter(x=>!x[0].hidden),hid=all.filter(x=>x[0].hidden);
   return `<div class="adm-wrap">`+admBack("set","🛠 Admin panel")+`<div class="card"><div class="lbl" style="margin-top:0">UMUMIY SOZLAMALAR</div><div class="flex"><div style="flex:1"><small style="color:var(--mut)">Ustama, %</small><input id="a_mk" type="number" step="0.5" value="${A.settings.markup}"></div><div style="flex:1"><small style="color:var(--mut)">1 USD = ? somoni</small><input id="a_rt" type="number" step="0.01" value="${A.settings.usd_tjs}"></div></div><small style="color:var(--mut);display:block;margin:10px 0">Donatix narxlariga qo'llanadi. Qo'lda o'zgartirilgan narxlarga ta'sir qilmaydi.</small><button class="btn" onclick="admSaveSet()">Saqlash</button></div>
   <div class="lbl">O'YINLAR (${vis.length})</div>${vis.map(x=>row(...x)).join("")}${hid.length?`<div class="lbl">YASHIRIN O'YINLAR (${hid.length})</div>`+hid.map(x=>row(...x)).join(""):""}
-  <div class="lbl">MIJOZLAR</div><div class="card gr" onclick="admUsers(true)"><div class="av" style="width:64px;height:64px;background:#2a2150;color:#a78bfa;border-radius:16px;flex:none">${I("users",30)}</div><div style="flex:1;min-width:0"><b style="font-size:18px">Mijozlar ro'yxati</b><br><small style="color:var(--mut);font-size:14px">Barcha ma'lumotlar, balans, telefon, qulflash</small></div><span style="color:var(--mut)">›</span></div></div>`}
+  <div class="lbl">BOSHQARUV</div><div class="card gr" onclick="go('ads')" style="margin-bottom:10px"><div class="av" style="width:64px;height:64px;background:#1f3a2e;color:#4ade80;border-radius:16px;flex:none">${I("chart",30)}</div><div style="flex:1;min-width:0"><b style="font-size:18px">Statistika</b><br><small style="color:var(--mut);font-size:14px">Daromad, buyurtmalar, Excel eksport</small></div><span style="color:var(--mut)">›</span></div>
+  <div class="card gr" onclick="admUsers(true)"><div class="av" style="width:64px;height:64px;background:#2a2150;color:#a78bfa;border-radius:16px;flex:none">${I("users",30)}</div><div style="flex:1;min-width:0"><b style="font-size:18px">Mijozlar ro'yxati</b><br><small style="color:var(--mut);font-size:14px">Barcha ma'lumotlar, balans, telefon, qulflash</small></div><span style="color:var(--mut)">›</span></div></div>`}
 
 // ---------- ADMIN: MIJOZLAR ----------
 const AU0=()=>({q:"",sort:"new",flt:"",users:[],stats:{}});
@@ -236,6 +238,75 @@ async function admUsers(reset){if(reset||!S.au)S.au=AU0();const A=S.au;const r=a
 function auSet(k,v){S.au[k]=v;admUsers()}
 const stBox=(l,v,c)=>`<div style="flex:1;min-width:130px;background:#ffffff0d;border:1px solid #ffffff14;border-radius:18px;padding:12px 14px"><small style="color:var(--mut);font-weight:700;letter-spacing:.04em">${l}</small><div style="font-size:21px;font-weight:800;margin-top:4px;color:${c||"var(--tx)"}">${v}</div></div>`;
 const uav=(x,sz)=>`<div class="av" style="position:relative;flex:none;width:${sz}px;height:${sz}px;background:hsl(${((x.name||"?").charCodeAt(0)||0)*37%360} 55% 42%)">${ini(x.name)}${avi(x.av)}</div>`;
+// ---------- ADMIN PANEL QULFI (PIN + Face ID / Touch ID) ----------
+function admOk(){return S.admUnlocked&&(Date.now()-S.admUnlocked<15*60*1000)}
+function admGuard(fn){return()=>admOk()?fn():admLock()}
+async function admBioTry(silent){
+  if(!tg||!tg.BiometricManager)return false;
+  const bm=tg.BiometricManager;
+  try{await new Promise(res=>bm.init(res))}catch(e){return false}
+  if(!bm.isBiometricAvailable)return false;
+  if(!bm.isAccessGranted){if(silent)return false;const granted=await new Promise(res=>bm.requestAccess({reason:"Admin panelni himoyalash uchun"},res));if(!granted)return false}
+  if(!bm.isBiometricTokenSaved)return false;
+  return new Promise(res=>{bm.authenticate({reason:"Admin panelni ochish"},async(ok,token)=>{
+    if(!ok||!token)return res(false);
+    const r=await api("/api/admin/pin/verify",{pin:token});
+    res(!!(r&&r.ok))})})}
+function admUnlockDone(){S.admUnlocked=Date.now();render()}
+function admLock(){
+  (async()=>{if(await admBioTry(true))admUnlockDone()})();
+  setTimeout(()=>{if(tg&&tg.BiometricManager&&tg.BiometricManager.isBiometricAvailable&&!$("#adm_bio_row"))render()},300);
+  return `<div class="adm-wrap" style="padding:60px 20px;text-align:center">
+  <div style="font-size:60px">🔒</div><h2 style="margin:10px 0 6px">Admin panel qulflangan</h2>
+  <p style="color:var(--mut);margin-bottom:22px">Davom etish uchun PIN kiriting.</p>
+  <input id="adm_pin" type="password" inputmode="numeric" maxlength="8" placeholder="• • • •" style="text-align:center;letter-spacing:10px;font-size:24px;margin-bottom:14px" onkeydown="if(event.key=='Enter')admPinSubmit()">
+  <button class="btn" onclick="admPinSubmit()">Ochish</button>
+  <div id="adm_err" style="color:#f87171;margin-top:12px;min-height:18px"></div>
+  ${tg&&tg.BiometricManager&&tg.BiometricManager.isBiometricAvailable?`<div id="adm_bio_row"><button class="btn" style="margin-top:16px;background:#3b3399" onclick="admBioBtn()">👤 Face ID / Touch ID</button></div>`:""}
+  </div>`}
+async function admPinSubmit(){
+  const pin=($("#adm_pin").value||"").trim(); const err=$("#adm_err");
+  if(!pin){err.textContent="PIN kiriting";return}
+  if(!/^\\d+$/.test(pin)){err.textContent="Faqat raqam kiriting";return}
+  const r=await api("/api/admin/pin/verify",{pin});
+  if(r&&r.ok){if(tg&&tg.BiometricManager&&tg.BiometricManager.isBiometricAvailable)tg.BiometricManager.updateBiometricToken(pin,()=>{});admUnlockDone();return}
+  if(r&&r.error=="nopin"){
+    if(pin.length<4){err.textContent="Birinchi marta o'rnatish: kamida 4 ta raqam kiriting";return}
+    const r2=await api("/api/admin/pin/set",{new:pin});
+    if(r2&&r2.ok){if(tg&&tg.BiometricManager&&tg.BiometricManager.isBiometricAvailable)tg.BiometricManager.updateBiometricToken(pin,()=>{});toast("PIN o'rnatildi ✅");admUnlockDone()}
+    else err.textContent=(r2&&r2.msg)||"Xato"
+    return}
+  if(r&&r.error=="locked"){err.textContent="Juda ko'p xato urinish. Birozdan so'ng qayta urining.";return}
+  err.textContent="Noto'g'ri PIN"}
+async function admBioBtn(){const err=$("#adm_err");if(await admBioTry(false))admUnlockDone();else err.textContent="Face ID/Touch ID ishlamadi, PIN kiriting"}
+async function admChangePin(){
+  const old=prompt("Eski PIN:"); if(old==null)return;
+  const nw=prompt("Yangi PIN (4-8 raqam):"); if(nw==null)return;
+  const r=await api("/api/admin/pin/set",{old,new:nw});
+  if(r&&r.ok){toast("PIN yangilandi ✅");if(tg&&tg.BiometricManager&&tg.BiometricManager.isBiometricAvailable)tg.BiometricManager.updateBiometricToken(nw,()=>{})}
+  else alert((r&&r.msg)||t("err"))}
+
+// ---------- ADMIN PANEL: STATISTIKA ----------
+const AS0=()=>({period:"7",data:null});
+async function admStats(reset){if(reset||!S.as)S.as=AS0();const A=S.as;const r=await api("/api/admin/stats?period="+A.period);if(r&&r.ok){A.data=r;render()}else alert(t("err"))}
+function asSet(p){S.as.period=p;admStats()}
+function ads(){const A=S.as||AS0();if(!A.data){admStats(true);return admBack("adm","📊 Statistika")+`<p style="text-align:center;color:var(--mut);margin-top:40px">Yuklanmoqda...</p>`}
+  const d=A.data,seg=`<div class="seg" style="margin:0 0 14px">${[["7","7 kun"],["30","30 kun"],["all","Hammasi"]].map(([v,n])=>`<a class="${A.period==v?"on":""}" onclick="asSet('${v}')">${n}</a>`).join("")}</div>`;
+  const max=Math.max(1,...d.chart.map(x=>x.s));
+  const bars=d.chart.map(x=>`<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;min-width:0"><div style="width:100%;max-width:22px;height:${Math.max(3,Math.round(x.s/max*90))}px;background:linear-gradient(180deg,#8b7bff,#5c4dd6);border-radius:5px 5px 0 0" title="${x.d}: ${fmt(x.s)} c."></div><small style="color:var(--mut);font-size:10px">${x.d.split("-")[1]}</small></div>`).join("");
+  const topg=d.top_games.length?d.top_games.map((g,i)=>`<div class="rk"><div style="width:30px;text-align:center;font-weight:800;color:var(--mut)">${i+1}</div><div style="flex:1"><b>${esc(g.name)}</b><br><small style="color:var(--mut)">${g.orders} ta buyurtma</small></div><b>${fmt(g.revenue)} c.</b></div>`).join(""):`<p style="color:var(--mut);text-align:center">Ma'lumot yo'q</p>`;
+  return admBack("adm","📊 Statistika")+seg+
+  `<div class="flex" style="flex-wrap:wrap;gap:10px;margin-bottom:14px">${stBox("BUGUN",fmt(d.today.revenue)+" c.","#4ade80")}${stBox("BUGUNGI BUYURTMA",d.today.orders)}${stBox("TANLANGAN DAVR",fmt(d.period.revenue)+" c.","#4ade80")}${stBox("JAMI (hammasi)",fmt(d.all_time.revenue)+" c.")}${stBox("KUTILAYOTGAN BUYURTMA",d.pending_orders,d.pending_orders?"#f59e0b":null)}${stBox("KUTILAYOTGAN TO'LOV",d.pending_topups,d.pending_topups?"#f59e0b":null)}${stBox("MIJOZLAR",d.users.total)}${stBox("YANGI MIJOZ",d.users.new,"#4ade80")}</div>
+  <div class="lbl">KUNLIK DAROMAD (bajarilgan buyurtmalar)</div><div class="card" style="display:flex;align-items:flex-end;gap:4px;height:130px;padding:12px 10px 8px">${bars}</div>
+  <div class="lbl">ENG KO'P SOTILGAN O'YINLAR</div><div class="card">${topg}</div>
+  <div class="lbl">EKSPORT</div><div class="card" style="display:flex;gap:8px;flex-wrap:wrap">
+    <button class="btn" style="flex:1;min-width:120px" onclick="admExport('7')">📥 7 kun</button>
+    <button class="btn" style="flex:1;min-width:120px" onclick="admExport('30')">📥 30 kun</button>
+    <button class="btn" style="flex:1;min-width:120px;background:#3b3399" onclick="admExport('all')">📥 Hammasi</button>
+  </div><p style="color:var(--mut);font-size:13px;text-align:center;margin-top:8px">Fayl Telegram botdagi shaxsiy chatingizga yuboriladi. Har Dushanba ertalab o'tgan haftalik hisobot avtomatik yuboriladi.</p>
+  <button class="btn" style="margin-top:16px;background:#2a2150" onclick="admChangePin()">🔑 PIN kodni o'zgartirish</button>`}
+async function admExport(period){toast("Tayyorlanmoqda...");const r=await api("/api/admin/export",{period});if(r&&r.ok)toast("✅ Botdagi chatingizga yuborildi");else alert((r&&r.msg)||t("err"))}
+
 function adu(){const A=S.au||AU0(),st=A.stats||{};
   const seg=(k,arr)=>`<div class="seg" style="margin:0 0 12px">${arr.map(([v,n])=>`<a class="${A[k]==v?"on":""}" onclick="auSet('${k}','${v}')">${n}</a>`).join("")}</div>`;
   const rows=(A.users||[]).map(x=>`<div class="rk" style="${x.blocked?"opacity:.6;border-color:#f8717155":""}" onclick="admUser(${x.id})">${uav(x,52)}<div style="flex:1;min-width:0"><b class="tr">${x.blocked?"🔒 ":""}${esc(x.name||"—")}</b><br><small style="color:var(--mut)">${x.username?"@"+esc(x.username):"username yo'q"} · ${esc(x.phone||"📵 raqamsiz")}</small></div><div style="text-align:right;flex:none"><b>${fmt(x.balance)}</b><br><small style="color:var(--mut)">${x.oc} ta xarid</small></div></div>`).join("");

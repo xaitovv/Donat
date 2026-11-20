@@ -1,9 +1,10 @@
-import sqlite3, secrets, threading
+import sqlite3, secrets, threading, hashlib, time
 _l = threading.Lock()
 import logging, persist
 logging.warning("baza: %s", persist.restore("data.db"))   # yangi deploydan keyin zaxiradan tiklaydi
 db = sqlite3.connect("data.db", check_same_thread=False, isolation_level=None)
 db.row_factory = sqlite3.Row
+db.execute("CREATE TABLE IF NOT EXISTS adminlock(id INTEGER PRIMARY KEY CHECK(id=1), pin_hash TEXT, salt TEXT, fails INTEGER DEFAULT 0, lock_until REAL DEFAULT 0)")
 for _p in ("PRAGMA journal_mode=WAL", "PRAGMA synchronous=NORMAL", "PRAGMA busy_timeout=5000"):
     try: db.execute(_p)
     except sqlite3.Error: pass
@@ -243,3 +244,24 @@ def icon_set(gid, url): q("INSERT INTO gameicon(game_id,url) VALUES(?,?) ON CONF
 def icon_get(gid):
     r = q("SELECT url FROM gameicon WHERE game_id=?", (gid,)).fetchone()
     return r["url"] if r else None
+
+# ---------- ADMIN PANEL PIN / BIOMETRIK QULF ----------
+def _pinh(pin, salt): return hashlib.sha256((salt + pin).encode()).hexdigest()
+def pin_get(): return q("SELECT * FROM adminlock WHERE id=1").fetchone()
+def pin_set(pin):
+    salt = secrets.token_hex(16); h = _pinh(pin, salt)
+    if q("SELECT 1 FROM adminlock WHERE id=1").fetchone():
+        q("UPDATE adminlock SET pin_hash=?, salt=?, fails=0, lock_until=0 WHERE id=1", (h, salt))
+    else:
+        q("INSERT INTO adminlock(id,pin_hash,salt) VALUES(1,?,?)", (h, salt))
+def pin_check(pin):
+    """'ok' | 'bad' | 'nopin' | 'locked' qaytaradi. 5 marta xato -> 5 daqiqa qulflanadi (PIN'ni taxmin qilishdan himoya)."""
+    r = pin_get()
+    if not r or not r["pin_hash"]: return "nopin"
+    if time.time() < (r["lock_until"] or 0): return "locked"
+    if _pinh(pin, r["salt"]) == r["pin_hash"]:
+        q("UPDATE adminlock SET fails=0, lock_until=0 WHERE id=1"); return "ok"
+    fails = (r["fails"] or 0) + 1
+    lu = time.time() + 300 if fails >= 5 else 0
+    q("UPDATE adminlock SET fails=?, lock_until=? WHERE id=1", (fails, lu))
+    return "locked" if lu else "bad"

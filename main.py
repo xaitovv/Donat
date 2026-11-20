@@ -1,4 +1,5 @@
 import html as H
+import io
 import json as _json, urllib.request, urllib.error, urllib.parse
 import re, math, hashlib
 import receipt_ai as AI
@@ -1652,6 +1653,127 @@ async def admin_block(r):
     if not D.q("SELECT 1 FROM users WHERE id=?", (uid,)).fetchone(): return web.json_response({"ok": False, "msg": "Mijoz topilmadi"})
     D.q("UPDATE users SET blocked=? WHERE id=?", (val, uid))
     return web.json_response({"ok": True, "blocked": bool(val)})
+
+# ---------- ADMIN PANEL: PIN / FACE ID QULFI ----------
+async def admin_pin_status(r):
+    if not _admin(r): return web.json_response({"error": "forbidden"}, status=403)
+    row = D.pin_get()
+    return web.json_response({"ok": True, "set": bool(row and row["pin_hash"])})
+async def admin_pin_verify(r):
+    if not _admin(r): return web.json_response({"error": "forbidden"}, status=403)
+    try: pin = str((await r.json()).get("pin", "")).strip()
+    except Exception: pin = ""
+    if not (pin.isdigit() and pin.isascii()): return web.json_response({"ok": False, "error": "bad"})
+    res = D.pin_check(pin)
+    return web.json_response({"ok": res == "ok", "error": None if res == "ok" else res})
+async def admin_pin_set(r):
+    if not _admin(r): return web.json_response({"error": "forbidden"}, status=403)
+    try: b = await r.json()
+    except Exception: b = {}
+    new = str(b.get("new", "")).strip(); old = str(b.get("old", "")).strip()
+    if not (new.isdigit() and new.isascii() and 4 <= len(new) <= 8): return web.json_response({"ok": False, "msg": "PIN 4-8 ta raqam bo'lsin"})
+    row = D.pin_get()
+    if row and row["pin_hash"]:
+        if not old: return web.json_response({"ok": False, "msg": "Eski PIN kerak"})
+        res = D.pin_check(old)
+        if res == "locked": return web.json_response({"ok": False, "msg": "Juda ko'p xato urinish, birozdan so'ng qayta urining"})
+        if res != "ok": return web.json_response({"ok": False, "msg": "Eski PIN noto'g'ri"})
+    D.pin_set(new)
+    return web.json_response({"ok": True})
+
+# ---------- ADMIN PANEL: STATISTIKA ----------
+async def admin_stats(r):
+    if not _admin(r): return web.json_response({"error": "forbidden"}, status=403)
+    pr = r.query.get("period", "7")
+    days = None if pr == "all" else max(1, min(int(pr), 3650)) if pr.isdigit() else 7
+    w = f"AND ts > datetime('now','-{days} days')" if days else ""
+    chart_days = days if (days and days <= 60) else 30
+    rowsd = D.q(f"SELECT date(ts) d, COALESCE(SUM(price),0) s, COUNT(*) c FROM orders WHERE status='done' AND ts > datetime('now','-{chart_days} days') GROUP BY date(ts)").fetchall()
+    dmap = {x["d"]: x for x in rowsd}
+    chart = []
+    for i in range(chart_days - 1, -1, -1):
+        dd = (datetime.now() - timedelta(days=i)).strftime("%Y-%m-%d")
+        x = dmap.get(dd); chart.append({"d": dd[5:], "s": round(x["s"], 2) if x else 0, "c": x["c"] if x else 0})
+    per = D.q(f"SELECT COUNT(*) c, COALESCE(SUM(price),0) s FROM orders WHERE status='done' {w}").fetchone()
+    allt = D.q("SELECT COUNT(*) c, COALESCE(SUM(price),0) s FROM orders WHERE status='done'").fetchone()
+    today = D.q("SELECT COUNT(*) c, COALESCE(SUM(price),0) s FROM orders WHERE status='done' AND date(ts)=date('now')").fetchone()
+    topup_s = D.q(f"SELECT COALESCE(SUM(amount),0) s FROM topups WHERE status='done' {w}").fetchone()["s"]
+    pend_o = D.q("SELECT COUNT(*) c FROM orders WHERE status IN ('pending','processing')").fetchone()["c"]
+    pend_t = D.q("SELECT COUNT(*) c FROM topups WHERE status='pending'").fetchone()["c"]
+    u_tot = D.q("SELECT COUNT(*) c FROM users").fetchone()["c"]
+    u_new = D.q(f"SELECT COUNT(*) c FROM users WHERE joined {('> datetime(\'now\',\'-' + str(days) + ' days\')') if days else "> ''"}").fetchone()["c"]
+    topg = D.q(f"SELECT game, COUNT(*) c, COALESCE(SUM(price),0) s FROM orders WHERE status='done' AND game!='' {w} GROUP BY game ORDER BY s DESC LIMIT 5").fetchall()
+    return web.json_response({"ok": True,
+        "period_days": days, "period": {"orders": per["c"], "revenue": round(per["s"], 2), "topups": round(topup_s, 2)},
+        "today": {"orders": today["c"], "revenue": round(today["s"], 2)}, "all_time": {"orders": allt["c"], "revenue": round(allt["s"], 2)},
+        "pending_orders": pend_o, "pending_topups": pend_t, "users": {"total": u_tot, "new": u_new}, "chart": chart,
+        "top_games": [{"name": x["game"] or "—", "orders": x["c"], "revenue": round(x["s"], 2)} for x in topg]})
+
+# ---------- EXCEL EKSPORT (buyurtmalar) ----------
+def build_orders_xlsx(days=None):
+    import openpyxl
+    from openpyxl.styles import Font, Alignment, PatternFill
+    from openpyxl.utils import get_column_letter
+    w = f"WHERE o.ts > datetime('now','-{days} days')" if days else ""
+    rows = D.q(f"SELECT o.*, u.name uname, u.username uuser, u.phone uphone FROM orders o LEFT JOIN users u ON u.id=o.uid {w} ORDER BY o.id DESC").fetchall()
+    wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Buyurtmalar"
+    head = ["ID", "Sana", "Mijoz", "Username", "Telefon", "Telegram ID", "O'yin", "Mahsulot", "Narx (c.)", "Holat"]
+    ws.append(head)
+    for c in range(1, len(head) + 1):
+        cell = ws.cell(row=1, column=c); cell.font = Font(bold=True, color="FFFFFF"); cell.fill = PatternFill("solid", fgColor="4F46E5"); cell.alignment = Alignment(horizontal="center")
+    stl = {"done": "Bajarildi", "pending": "Kutilmoqda", "processing": "Jarayonda", "cancelled": "Bekor qilindi", "rejected": "Rad etildi", "expired": "Muddati o'tgan"}
+    total = 0.0
+    for o in rows:
+        ws.append([o["id"], to_local(o["ts"]), o["uname"] or "", ("@" + o["uuser"]) if o["uuser"] else "", o["uphone"] or "", o["uid"],
+                   o["game"] or "", o["item"] or o["title"], round(o["price"], 2), stl.get(o["status"], o["status"])])
+        if o["status"] == "done": total += o["price"]
+    for i, h in enumerate(head, 1): ws.column_dimensions[get_column_letter(i)].width = max(12, len(h) + 4)
+    ws.freeze_panes = "A2"
+    buf = io.BytesIO(); wb.save(buf); buf.seek(0)
+    return buf.getvalue(), len(rows), total
+async def admin_export(r):
+    if not _admin(r): return web.json_response({"error": "forbidden"}, status=403)
+    try: b = await r.json()
+    except Exception: b = {}
+    pr = str(b.get("period", "7"))
+    days = None if pr == "all" else max(1, min(int(pr), 3650)) if pr.isdigit() else 7
+    try: data, n, total = build_orders_xlsx(days)
+    except Exception:
+        logging.exception("excel export"); return web.json_response({"ok": False, "msg": "Excel yaratishda xato"})
+    fname = f"buyurtmalar_{'hammasi' if days is None else str(days)+'kun'}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+    try: await bot.send_document(C.ADMIN_ID, BufferedInputFile(data, fname), caption=f"📊 Eksport: {n} ta buyurtma, bajarilganlar jami {total:.2f} somoni")
+    except Exception:
+        logging.exception("send export"); return web.json_response({"ok": False, "msg": "Botga yuborishda xato"})
+    return web.json_response({"ok": True})
+async def xls_worker():
+    """Har Dushanba ertalab adminning shaxsiy chatiga o'tgan 7 kunlik hisobotni avtomatik yuboradi."""
+    while True:
+        now = datetime.now(); ahead = (7 - now.weekday()) % 7
+        if ahead == 0 and now.hour >= 9: ahead = 7
+        nxt = now.replace(hour=9, minute=0, second=0, microsecond=0) + timedelta(days=ahead)
+        await asyncio.sleep(max(60, (nxt - now).total_seconds()))
+        try:
+            data, n, total = build_orders_xlsx(7)
+            fname = f"haftalik_hisobot_{datetime.now().strftime('%Y%m%d')}.xlsx"
+            await bot.send_document(C.ADMIN_ID, BufferedInputFile(data, fname),
+                                     caption=f"📊 <b>Haftalik hisobot</b>\n🧾 Bajarilgan buyurtmalar: {n}\n💰 Jami: {total:.2f} somoni", parse_mode="HTML")
+        except Exception: logging.exception("xls_worker")
+@dp.message(Command("setpin"))
+async def setpin_cmd(m: Message, command: CommandObject):
+    if m.from_user.id != C.ADMIN_ID: return
+    pin = (command.args or "").strip()
+    if not (pin.isdigit() and pin.isascii() and 4 <= len(pin) <= 8): return await m.answer("Foydalanish: /setpin 123456  (4-8 ta raqam)")
+    D.pin_set(pin); await m.answer("✅ Admin panel PIN'i o'rnatildi/yangilandi.")
+@dp.message(Command("excel"))
+async def excel_cmd(m: Message, command: CommandObject):
+    if m.from_user.id != C.ADMIN_ID: return
+    arg = (command.args or "7").strip()
+    days = None if arg == "all" else int(arg) if arg.isdigit() else 7
+    try:
+        data, n, total = build_orders_xlsx(days)
+        fname = f"buyurtmalar_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+        await bot.send_document(m.chat.id, BufferedInputFile(data, fname), caption=f"📊 {n} ta buyurtma, jami {total:.2f} c.")
+    except Exception as e: await m.answer(f"❌ Xato: {H.escape(repr(e))[:300]}")
 async def reviews(r):
     rows = D.q("SELECT r.oid, r.stars, r.text, r.reply, r.ts, o.game, o.item, o.title, u.name, u.id uid FROM ratings r JOIN orders o ON o.id=r.oid JOIN users u ON u.id=r.uid ORDER BY r.oid DESC LIMIT 300").fetchall()
     dt = lambda s: f"{s[8:10]}.{s[5:7]}.{s[:4]}" if s else ""
@@ -1706,7 +1828,9 @@ async def main():
     app = web.Application(middlewares=[mw], client_max_size=8 * 1024 * 1024)
     app.on_response_prepare.append(_sec)
     app.add_routes([web.get("/api/catalog", catalog), web.get("/api/me", me), web.post("/api/lang", lang), web.post("/api/order", order),
-                    web.post("/api/topup", topup), web.post("/api/receipt", receipt_api), web.get("/api/history", history), web.get("/api/top", top_api), web.get("/api/checkid", checkid), web.get("/api/admin/games", admin_games), web.get("/api/admin/users", admin_users), web.get("/api/admin/user", admin_user), web.post("/api/admin/block", admin_block), web.get("/api/admin/game", admin_game_api), web.post("/api/admin/save", admin_save), web.post("/api/admin/info", admin_info_save), web.get("/gi/{g}/{p}", info_img), web.get("/api/reviews", reviews), web.route("OPTIONS", "/{p:.*}", lambda r: web.Response()),
+                    web.post("/api/topup", topup), web.post("/api/receipt", receipt_api), web.get("/api/history", history), web.get("/api/top", top_api), web.get("/api/checkid", checkid), web.get("/api/admin/games", admin_games), web.get("/api/admin/users", admin_users), web.get("/api/admin/user", admin_user), web.post("/api/admin/block", admin_block),
+                    web.get("/api/admin/pin", admin_pin_status), web.post("/api/admin/pin/verify", admin_pin_verify), web.post("/api/admin/pin/set", admin_pin_set),
+                    web.get("/api/admin/stats", admin_stats), web.post("/api/admin/export", admin_export), web.get("/api/admin/game", admin_game_api), web.post("/api/admin/save", admin_save), web.post("/api/admin/info", admin_info_save), web.get("/gi/{g}/{p}", info_img), web.get("/api/reviews", reviews), web.route("OPTIONS", "/{p:.*}", lambda r: web.Response()),
                     web.get("/", lambda r: web.FileResponse(os.path.join(HERE, "index.html")))])
     for f in ("style.css", "app.js", "i18n.js", "ru.json", "uz.json", "tg.json", "en.json", "logo.png", "splash.jpg"):
         app.router.add_get("/" + f, lambda r, f=f: web.FileResponse(os.path.join(HERE, f)))
@@ -1722,6 +1846,7 @@ async def main():
     run = web.AppRunner(app); await run.setup(); await web.TCPSite(run, "0.0.0.0", C.PORT).start()
     _t = asyncio.create_task(dx_worker()); TASKS.add(_t)
     _b = asyncio.create_task(bk_worker()); TASKS.add(_b)
+    _x = asyncio.create_task(xls_worker()); TASKS.add(_x)
     import signal
     def _bye():
         async def fin():

@@ -30,3 +30,13 @@ chek ekanligi, summa, qabul qiluvchi raqam, sana, tahrir belgilari. Qaror baribi
 Render -> Environment: REQUIRED_CHANNELS = @kanal1,@kanal2
 Yopiq kanal: -1001234567890|https://t.me/+InviteKod|Kanal nomi  (vergul bilan ajrating)
 Bot HAR BIR kanalda admin bo'lishi shart. Oqim: /start -> til -> obuna -> «Tekshirish» -> menyu. Obunasiz Mini App ham ochilmaydi (API 403).
+
+## Admin panel qulfi (PIN / Face ID / Touch ID)
+Sozlash shart emas — birinchi marta admin panelga kirganda ilovaning o'zi PIN o'rnatishni so'raydi (4-8 raqam).
+Telefon Face ID/Touch ID'ni qo'llab-quvvatlasa, shu PIN unga bog'lanadi va keyingi safar biometrika bilan ochish mumkin.
+5 marta noto'g'ri PIN -> 5 daqiqaga qulflanadi. PIN'ni unutsangiz yoki qurilma almashsangiz, botga yuboring: /setpin 123456
+
+## Excel eksport va statistika
+Admin panel -> Statistika: bugungi/haftalik/oylik daromad, kutilayotgan buyurtma-to'lovlar, eng ko'p sotilgan o'yinlar, Excel yuklab olish tugmalari.
+Fayl har doim sizning shaxsiy Telegram chatingizga yuboriladi. Har Dushanba ertalab soat 9:00 da o'tgan haftalik hisobot o'zi yuboriladi.
+Qo'lda: botga /excel 7  yoki  /excel 30  yoki  /excel all
