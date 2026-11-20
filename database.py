@@ -5,6 +5,7 @@ logging.warning("baza: %s", persist.restore("data.db"))   # yangi deploydan keyi
 db = sqlite3.connect("data.db", check_same_thread=False, isolation_level=None)
 db.row_factory = sqlite3.Row
 db.execute("CREATE TABLE IF NOT EXISTS adminlock(id INTEGER PRIMARY KEY CHECK(id=1), pin_hash TEXT, salt TEXT, fails INTEGER DEFAULT 0, lock_until REAL DEFAULT 0)")
+db.execute("CREATE TABLE IF NOT EXISTS alerts(id INTEGER PRIMARY KEY AUTOINCREMENT, uid INTEGER, kind TEXT, detail TEXT, ts DATETIME DEFAULT CURRENT_TIMESTAMP, seen INTEGER DEFAULT 0)")
 for _p in ("PRAGMA journal_mode=WAL", "PRAGMA synchronous=NORMAL", "PRAGMA busy_timeout=5000"):
     try: db.execute(_p)
     except sqlite3.Error: pass
@@ -265,3 +266,12 @@ def pin_check(pin):
     lu = time.time() + 300 if fails >= 5 else 0
     q("UPDATE adminlock SET fails=?, lock_until=? WHERE id=1", (fails, lu))
     return "locked" if lu else "bad"
+
+# ---------- SHUBHALI FAOLIYAT ----------
+def alert_add(uid, kind, detail):
+    q("INSERT INTO alerts(uid,kind,detail) VALUES(?,?,?)", (uid, kind, detail))
+def alerts_list(limit=100, unseen_only=False):
+    w = "WHERE seen=0" if unseen_only else ""
+    return q(f"SELECT * FROM alerts {w} ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+def alerts_mark_seen(aid): q("UPDATE alerts SET seen=1 WHERE id=?", (aid,))
+def alerts_count_unseen(): return q("SELECT COUNT(*) c FROM alerts WHERE seen=0").fetchone()["c"]

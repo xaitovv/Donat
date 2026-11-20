@@ -30,12 +30,12 @@ async function init(){
   render();if(new URLSearchParams(location.search).get("go")=="hist")go("hist");setTimeout(()=>$("#splash").classList.add("hide"),Math.max(0,1500-(Date.now()-T0)))}
 function render(){
   if(S.locked)return;
-  const v=S.view,m={menu,game,topup,meth,hist,friends,set,rev,top:topv,res:resv,adm:admGuard(adm),admg:admGuard(admg),adu:admGuard(adu),adus:admGuard(adus),ads:admGuard(ads),pay:payv},sub=["game","topup","meth","pay","rev","res","adm","admg","adu","adus","ads"].includes(v);
+  const v=S.view,m={menu,game,topup,meth,hist,friends,set,rev,top:topv,res:resv,adm:admGuard(adm),admg:admGuard(admg),adu:admGuard(adu),adus:admGuard(adus),ads:admGuard(ads),ada:admGuard(ada),adb:admGuard(adb),pay:payv},sub=["game","topup","meth","pay","rev","res","adm","admg","adu","adus","ads","ada","adb"].includes(v);
   $("#app").innerHTML=m[v]();
   $("#nav").style.display=v=="res"?"none":"";
-  $("#nav").innerHTML=NAV.map(([k,i,n])=>`<a class="${v==k||(k=="menu"&&sub)||(k=="friends"&&v=="top")||(k=="set"&&(v=="adm"||v=="admg"||v=="adu"||v=="adus"||v=="ads"))?"on":""}" onclick="go('${k}')">${I(i)}<span>${t(n)}</span></a>`).join("");
+  $("#nav").innerHTML=NAV.map(([k,i,n])=>`<a class="${v==k||(k=="menu"&&sub)||(k=="friends"&&v=="top")||(k=="set"&&(v=="adm"||v=="admg"||v=="adu"||v=="adus"||v=="ads"||v=="ada"||v=="adb"))?"on":""}" onclick="go('${k}')">${I(i)}<span>${t(n)}</span></a>`).join("");
   if(tg)tg.BackButton[(sub||v=="top")?"show":"hide"]()}
-tg?.BackButton.onClick(()=>go(({top:"friends",admg:"adm",adm:"set",adu:"adm",adus:"adu",ads:"adm"})[S.view]||"menu"));
+tg?.BackButton.onClick(()=>go(({top:"friends",admg:"adm",adm:"set",adu:"adm",adus:"adu",ads:"adm",ada:"adm",adb:"adm"})[S.view]||"menu"));
 const bdg=g=>g.dx?'<b class="bdg a">AUTO</b>':g.new?'<b class="bdg n">NEW</b>':"";
 const iu=id=>String(id).startsWith("g_")?`/ico/${id}`:`/${id}.png?v=6`;
 const gi=g=>`<img class="gimg" src="${iu(g.id)}" onerror="this.style.display='none'">`;
@@ -230,6 +230,8 @@ function adm(){const A=S.adm||{games:[],settings:{}};
   return `<div class="adm-wrap">`+admBack("set","🛠 Admin panel")+`<div class="card"><div class="lbl" style="margin-top:0">UMUMIY SOZLAMALAR</div><div class="flex"><div style="flex:1"><small style="color:var(--mut)">Ustama, %</small><input id="a_mk" type="number" step="0.5" value="${A.settings.markup}"></div><div style="flex:1"><small style="color:var(--mut)">1 USD = ? somoni</small><input id="a_rt" type="number" step="0.01" value="${A.settings.usd_tjs}"></div></div><small style="color:var(--mut);display:block;margin:10px 0">Donatix narxlariga qo'llanadi. Qo'lda o'zgartirilgan narxlarga ta'sir qilmaydi.</small><button class="btn" onclick="admSaveSet()">Saqlash</button></div>
   <div class="lbl">O'YINLAR (${vis.length})</div>${vis.map(x=>row(...x)).join("")}${hid.length?`<div class="lbl">YASHIRIN O'YINLAR (${hid.length})</div>`+hid.map(x=>row(...x)).join(""):""}
   <div class="lbl">BOSHQARUV</div><div class="card gr" onclick="go('ads')" style="margin-bottom:10px"><div class="av" style="width:64px;height:64px;background:#1f3a2e;color:#4ade80;border-radius:16px;flex:none">${I("chart",30)}</div><div style="flex:1;min-width:0"><b style="font-size:18px">Statistika</b><br><small style="color:var(--mut);font-size:14px">Daromad, buyurtmalar, Excel eksport</small></div><span style="color:var(--mut)">›</span></div>
+  <div class="card gr" onclick="go('ada')" style="margin-bottom:10px"><div class="av" style="width:64px;height:64px;background:#3a1f1f;color:#f87171;border-radius:16px;flex:none">🚨</div><div style="flex:1;min-width:0"><b style="font-size:18px">Shubhali faoliyat</b><br><small style="color:var(--mut);font-size:14px">Avtomatik aniqlangan xavfli mijozlar</small></div><span style="color:var(--mut)">›</span></div>
+  <div class="card gr" onclick="go('adb')" style="margin-bottom:10px"><div class="av" style="width:64px;height:64px;background:#1f2a3a;color:#60a5fa;border-radius:16px;flex:none">📢</div><div style="flex:1;min-width:0"><b style="font-size:18px">Hammaga xabar</b><br><small style="color:var(--mut);font-size:14px">Barcha mijozlarga bir vaqtda yuborish</small></div><span style="color:var(--mut)">›</span></div>
   <div class="card gr" onclick="admUsers(true)"><div class="av" style="width:64px;height:64px;background:#2a2150;color:#a78bfa;border-radius:16px;flex:none">${I("users",30)}</div><div style="flex:1;min-width:0"><b style="font-size:18px">Mijozlar ro'yxati</b><br><small style="color:var(--mut);font-size:14px">Barcha ma'lumotlar, balans, telefon, qulflash</small></div><span style="color:var(--mut)">›</span></div></div>`}
 
 // ---------- ADMIN: MIJOZLAR ----------
@@ -306,6 +308,39 @@ function ads(){const A=S.as||AS0();if(!A.data){admStats(true);return admBack("ad
   </div><p style="color:var(--mut);font-size:13px;text-align:center;margin-top:8px">Fayl Telegram botdagi shaxsiy chatingizga yuboriladi. Har Dushanba ertalab o'tgan haftalik hisobot avtomatik yuboriladi.</p>
   <button class="btn" style="margin-top:16px;background:#2a2150" onclick="admChangePin()">🔑 PIN kodni o'zgartirish</button>`}
 async function admExport(period){toast("Tayyorlanmoqda...");const r=await api("/api/admin/export",{period});if(r&&r.ok)toast("✅ Botdagi chatingizga yuborildi");else alert((r&&r.msg)||t("err"))}
+
+// ---------- ADMIN PANEL: SHUBHALI FAOLIYAT ----------
+async function admAlerts(reset){const r=await api("/api/admin/alerts");if(r&&r.ok){S.ada=r;render()}else if(reset)alert(t("err"))}
+function ada(){if(!S.ada){admAlerts(true);return admBack("adm","🚨 Shubhali faoliyat")+`<p style="text-align:center;color:var(--mut);margin-top:40px">Yuklanmoqda...</p>`}
+  const a=S.ada.alerts;
+  const rows=a.length?a.map(x=>`<div class="card" style="margin-bottom:10px;${x.seen?"opacity:.55":"border-color:#f8717155"}"><div class="flex" style="justify-content:space-between;align-items:flex-start;gap:10px">
+    <div style="flex:1;min-width:0"><b>${x.blocked?"🔒 ":""}${esc(x.name||"Noma'lum")}</b> ${x.username?`<span style="color:var(--mut)">@${esc(x.username)}</span>`:""}<br><small style="color:var(--mut)">ID: ${x.uid} · ${esc(x.ts)}</small><p style="margin:8px 0 0;color:#fca5a5">⚠️ ${esc(x.detail)}</p></div></div>
+    <div class="flex" style="gap:8px;margin-top:10px"><button class="btn" style="flex:1;padding:10px;font-size:14px" onclick="admUser(${x.uid})">👤 Profil</button>${x.seen?"":`<button class="btn" style="flex:1;padding:10px;font-size:14px;background:#2a2150" onclick="admAlertSeen(${x.id})">✓ Ko'rildi</button>`}</div></div>`).join("")
+    :`<p style="text-align:center;color:var(--mut);margin-top:40px">Hozircha shubhali faoliyat yo'q 👍</p>`;
+  return admBack("adm","🚨 Shubhali faoliyat")+`<p style="color:var(--mut);font-size:13px;margin:-8px 0 16px">Yangi mijozning katta xaridi yoki qisqa vaqtda juda ko'p buyurtma berishi avtomatik aniqlanadi.</p>${rows}`}
+async function admAlertSeen(id){const r=await api("/api/admin/alerts/seen",{id});if(r&&r.ok)admAlerts()}
+
+// ---------- ADMIN PANEL: HAMMAGA XABAR ----------
+function adb(){
+  return admBack("adm","📢 Hammaga xabar")+`<p style="color:var(--mut);font-size:13px;margin:-8px 0 16px">HTML teglar ishlaydi: &lt;b&gt;qalin&lt;/b&gt;, &lt;i&gt;qiya&lt;/i&gt;. Avval o'zingizga sinab ko'ring.</p>
+  <textarea id="bc_text" rows="7" placeholder="Xabar matni..." style="width:100%;background:var(--bg);border:1px solid var(--line);border-radius:16px;padding:14px;color:var(--tx);font-size:15px;resize:vertical;font-family:inherit"></textarea>
+  <label class="flex" style="gap:8px;align-items:center;margin:12px 0;color:var(--mut);font-size:14px"><input type="checkbox" id="bc_blocked" style="width:auto"> Qulflangan mijozlarga ham yuborilsin</label>
+  <div class="flex" style="gap:8px"><button class="btn" style="background:#2a2150" onclick="bcTest()">🔍 O'zimga sinab ko'rish</button><button class="btn" onclick="bcSend()">📢 Hammaga yuborish</button></div>
+  <div id="bc_msg" style="margin-top:12px;text-align:center"></div>
+  <div id="bc_prog"></div>`}
+async function bcTest(){const text=$("#bc_text").value.trim();if(!text)return;const r=await api("/api/admin/broadcast",{text,test:true});$("#bc_msg").innerHTML=r&&r.ok?`<span style="color:#4ade80">✅ O'zingizning Telegram chatingizga yuborildi, tekshiring</span>`:`<span style="color:#f87171">${esc((r&&r.msg)||t("err"))}</span>`}
+async function bcSend(){
+  const text=$("#bc_text").value.trim(); if(!text)return;
+  const n=(S.au&&S.au.stats&&S.au.stats.total)||"barcha";
+  const go2=async ok=>{if(!ok)return;
+    const r=await api("/api/admin/broadcast",{text,include_blocked:$("#bc_blocked").checked});
+    if(r&&r.ok){$("#bc_msg").innerHTML=`<span style="color:#4ade80">🚀 Yuborilmoqda: ${r.total} ta mijozga...</span>`;bcPoll()}
+    else $("#bc_msg").innerHTML=`<span style="color:#f87171">${esc((r&&r.msg)||t("err"))}</span>`};
+  const msg=`Taxminan ${n} ta mijozga xabar yuborilsinmi? Buni bekor qilib bo'lmaydi.`;
+  if(tg&&tg.showConfirm)tg.showConfirm(msg,go2);else go2(confirm(msg))}
+async function bcPoll(){const r=await api("/api/admin/broadcast/status");if(!r)return;
+  $("#bc_prog").innerHTML=`<div class="card" style="margin-top:10px"><div class="flex" style="justify-content:space-between"><span>Yuborildi: ${r.sent}/${r.total}</span><span style="color:#f87171">Xato: ${r.failed}</span></div><div style="height:8px;background:var(--line);border-radius:4px;margin-top:8px;overflow:hidden"><div style="height:100%;width:${r.total?Math.round((r.sent+r.failed)/r.total*100):0}%;background:#60a5fa"></div></div></div>`;
+  if(r.running)setTimeout(bcPoll,1500);else if(r.total)$("#bc_msg").innerHTML=`<span style="color:#4ade80">✅ Tugadi: ${r.sent} ta yetib bordi, ${r.failed} ta yetmadi</span>`}
 
 function adu(){const A=S.au||AU0(),st=A.stats||{};
   const seg=(k,arr)=>`<div class="seg" style="margin:0 0 12px">${arr.map(([v,n])=>`<a class="${A[k]==v?"on":""}" onclick="auSet('${k}','${v}')">${n}</a>`).join("")}</div>`;

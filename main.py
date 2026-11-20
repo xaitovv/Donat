@@ -14,6 +14,9 @@ from aiogram.filters import Command, CommandStart, CommandObject
 from aiogram.types import (Message, CallbackQuery, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove,
                            InlineKeyboardButton, WebAppInfo, BufferedInputFile, FSInputFile, InputMediaDocument)
 import config as C, database as D, donatix as DX, persist
+try: from aiogram.exceptions import TelegramRetryAfter
+except Exception:
+    class TelegramRetryAfter(Exception): retry_after = 1
 
 # Baza tuzilmasini o'zi tekshiradi (database.py eski bo'lsa ham ishlayveradi)
 for _s in ("CREATE TABLE IF NOT EXISTS ratings(oid INTEGER PRIMARY KEY,uid INTEGER,stars INTEGER)",
@@ -1503,6 +1506,7 @@ async def order(r):
         logging.exception("order: admin send failed"); D.cancel_order(oid)   # pul qaytariladi
         return web.json_response({"error": "send"})
     await notify(uid, "acc", D.q("SELECT * FROM orders WHERE id=?", (oid,)).fetchone())
+    asyncio.create_task(check_sus_order(uid, price))
     if sku:
         t = asyncio.create_task(dx_place(oid, price, sku, fields, qty if stars else None)); TASKS.add(t); t.add_done_callback(TASKS.discard)
     return web.json_response({"ok": True, "balance": round(D.user(uid)["balance"], 2), "price": price, "game": gname, "item": iname, "nick": nick})
@@ -1568,6 +1572,7 @@ async def receipt_api(r):
     if D.rhash_get(h): return web.json_response({"error": "dup"})   # shu chek avval ishlatilgan
     tid = D.add_topup(uid, a, x["id"])
     if tid == -1: return web.json_response({"error": "pending"})
+    asyncio.create_task(check_sus_topup(uid, a))
     e = H.escape
     when = datetime.now(timezone(timedelta(hours=C.TZ_HOURS))).strftime("%d.%m.%Y %H:%M")
     full = f"{tg.get('first_name', '')} {tg.get('last_name', '')}".strip() or "—"
@@ -1774,6 +1779,109 @@ async def excel_cmd(m: Message, command: CommandObject):
         fname = f"buyurtmalar_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
         await bot.send_document(m.chat.id, BufferedInputFile(data, fname), caption=f"📊 {n} ta buyurtma, jami {total:.2f} c.")
     except Exception as e: await m.answer(f"❌ Xato: {H.escape(repr(e))[:300]}")
+
+# ---------- SHUBHALI FAOLIYAT (avtomatik aniqlash) ----------
+SUS_NEW_HOURS = 24          # "yangi mijoz" hisoblanadigan muddat
+SUS_ORDER_AMOUNT = 150      # yangi mijoz uchun shubhali hisoblanadigan bitta buyurtma narxi (somoni)
+SUS_TOPUP_AMOUNT = 300      # yangi mijoz uchun shubhali hisoblanadigan bitta to'ldirish summasi (somoni)
+SUS_ORDER_BURST = (5, 600)  # 10 daqiqada shuncha buyurtma bo'lsa shubhali
+SUS_TOPUP_BURST = (4, 3600) # 1 soatda shuncha to'lov so'rovi bo'lsa shubhali
+def _acc_age_h(u):
+    try: return (datetime.now() - datetime.strptime(u["joined"], "%Y-%m-%d %H:%M:%S")).total_seconds() / 3600
+    except Exception: return 999
+async def notify_alert(uid, reason):
+    try: u = D.user(uid)
+    except Exception: u = None
+    name = (u["name"] if u else "") or "—"; uname = ("@" + u["username"]) if (u and u["username"]) else "—"
+    txt = f"🚨 <b>Shubhali faoliyat</b>\n👤 {H.escape(name)} ({H.escape(uname)})\n🆔 <code>{uid}</code>\n⚠️ {H.escape(reason)}"
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="👤 Profil", callback_data=f"susr{uid}"), InlineKeyboardButton(text="🔒 Qulflash", callback_data=f"susb{uid}")]])
+    try: await bot.send_message(C.ADMIN_ID, txt, parse_mode="HTML", reply_markup=kb)
+    except Exception: logging.exception("notify_alert")
+async def check_sus_order(uid, price):
+    try:
+        u = D.user(uid); reasons = []
+        if _acc_age_h(u) < SUS_NEW_HOURS and price >= SUS_ORDER_AMOUNT:
+            reasons.append(f"Yangi mijoz ({_acc_age_h(u):.1f} soat oldin ro'yxatdan o'tgan), {price:.2f} c. lik buyurtma berdi")
+        n, win = SUS_ORDER_BURST
+        cnt = D.q(f"SELECT COUNT(*) c FROM orders WHERE uid=? AND ts > datetime('now','-{win} seconds')", (uid,)).fetchone()["c"]
+        if cnt >= n: reasons.append(f"{win // 60} daqiqa ichida {cnt} ta buyurtma berdi")
+        for r in reasons: D.alert_add(uid, "order", r); await notify_alert(uid, r)
+    except Exception: logging.exception("check_sus_order")
+async def check_sus_topup(uid, amount):
+    try:
+        u = D.user(uid); reasons = []
+        if _acc_age_h(u) < SUS_NEW_HOURS and amount >= SUS_TOPUP_AMOUNT:
+            reasons.append(f"Yangi mijoz ({_acc_age_h(u):.1f} soat oldin ro'yxatdan o'tgan), {amount:.2f} c. lik to'ldirish so'radi")
+        n, win = SUS_TOPUP_BURST
+        cnt = D.q(f"SELECT COUNT(*) c FROM topups WHERE uid=? AND ts > datetime('now','-{win} seconds')", (uid,)).fetchone()["c"]
+        if cnt >= n: reasons.append(f"{win // 60} daqiqa ichida {cnt} marta to'ldirish so'rovi yubordi")
+        for r in reasons: D.alert_add(uid, "topup", r); await notify_alert(uid, r)
+    except Exception: logging.exception("check_sus_topup")
+@dp.callback_query(F.data.regexp(r"^sus[rb]\d+$"))
+async def sus_decide(c: CallbackQuery):
+    if c.from_user.id != C.ADMIN_ID: return await c.answer()
+    uid = int(c.data[4:])
+    if c.data.startswith("susb"):
+        D.q("UPDATE users SET blocked=1 WHERE id=?", (uid,))
+        await c.answer("🔒 Qulflandi", show_alert=True)
+        try: await c.message.edit_reply_markup(reply_markup=None)
+        except Exception: pass
+    else:
+        u = D.user(uid)
+        await c.message.reply(f"👤 {H.escape(u['name'] or '—')} | {('@' + H.escape(u['username'])) if u['username'] else '—'} | ID: <code>{uid}</code>\n"
+                               f"💰 Balans: {u['balance']:.2f} c. | 📞 {H.escape(u['phone'] or '—')}", parse_mode="HTML")
+        await c.answer()
+
+# ---------- ADMIN PANEL: SHUBHALI FAOLIYAT RO'YXATI ----------
+async def admin_alerts(r):
+    if not _admin(r): return web.json_response({"error": "forbidden"}, status=403)
+    rows = D.alerts_list(100, r.query.get("unseen") == "1")
+    out = []
+    for a in rows:
+        u = D.q("SELECT name, username, blocked FROM users WHERE id=?", (a["uid"],)).fetchone()
+        out.append({"id": a["id"], "uid": a["uid"], "name": (u["name"] if u else "") or "", "username": (u["username"] if u else "") or "",
+                    "blocked": bool(u["blocked"]) if u else False, "detail": a["detail"], "ts": to_local(a["ts"]), "seen": bool(a["seen"])})
+    return web.json_response({"ok": True, "alerts": out, "unseen": D.alerts_count_unseen()})
+async def admin_alert_seen(r):
+    if not _admin(r): return web.json_response({"error": "forbidden"}, status=403)
+    try: aid = int((await r.json()).get("id"))
+    except Exception: return web.json_response({"ok": False})
+    D.alerts_mark_seen(aid); return web.json_response({"ok": True})
+
+# ---------- ADMIN PANEL: HAMMAGA XABAR (BROADCAST) ----------
+BCAST = {"running": False, "sent": 0, "failed": 0, "total": 0}
+async def run_broadcast(text, uids):
+    BCAST.update(running=True, sent=0, failed=0, total=len(uids))
+    for i, uid in enumerate(uids):
+        try:
+            await bot.send_message(uid, text, parse_mode="HTML"); BCAST["sent"] += 1
+        except TelegramRetryAfter as e:
+            await asyncio.sleep(e.retry_after + 0.5)
+            try: await bot.send_message(uid, text, parse_mode="HTML"); BCAST["sent"] += 1
+            except Exception: BCAST["failed"] += 1
+        except Exception: BCAST["failed"] += 1   # bot bloklangan, akkaunt o'chirilgan va h.k.
+        if (i + 1) % 25 == 0: await asyncio.sleep(1.05)   # Telegram tezlik chegarasidan o'tmaslik uchun
+    BCAST["running"] = False
+    try: await bot.send_message(C.ADMIN_ID, f"📢 Xabar yuborish tugadi.\n✅ Yetib bordi: {BCAST['sent']}\n❌ Yetmadi: {BCAST['failed']}")
+    except Exception: pass
+async def admin_broadcast(r):
+    if not _admin(r): return web.json_response({"error": "forbidden"}, status=403)
+    try: b = await r.json()
+    except Exception: b = {}
+    text = str(b.get("text", "")).strip()
+    if not text: return web.json_response({"ok": False, "msg": "Matn bo'sh bo'lmasin"})
+    if len(text) > 4000: return web.json_response({"ok": False, "msg": "Matn juda uzun (4000 belgidan kam bo'lsin)"})
+    if b.get("test"):
+        try: await bot.send_message(C.ADMIN_ID, text, parse_mode="HTML"); return web.json_response({"ok": True, "test": True})
+        except Exception as e: return web.json_response({"ok": False, "msg": f"Yuborilmadi (HTML xato bo'lishi mumkin): {str(e)[:200]}"})
+    if BCAST["running"]: return web.json_response({"ok": False, "msg": "Hozir boshqa xabar yuborilmoqda, tugashini kuting"})
+    uids = [x["id"] for x in D.q("SELECT id FROM users" + ("" if b.get("include_blocked") else " WHERE blocked=0")).fetchall()]
+    if not uids: return web.json_response({"ok": False, "msg": "Mijoz topilmadi"})
+    t = asyncio.create_task(run_broadcast(text, uids)); TASKS.add(t); t.add_done_callback(TASKS.discard)
+    return web.json_response({"ok": True, "total": len(uids)})
+async def admin_broadcast_status(r):
+    if not _admin(r): return web.json_response({"error": "forbidden"}, status=403)
+    return web.json_response({"ok": True, **BCAST})
 async def reviews(r):
     rows = D.q("SELECT r.oid, r.stars, r.text, r.reply, r.ts, o.game, o.item, o.title, u.name, u.id uid FROM ratings r JOIN orders o ON o.id=r.oid JOIN users u ON u.id=r.uid ORDER BY r.oid DESC LIMIT 300").fetchall()
     dt = lambda s: f"{s[8:10]}.{s[5:7]}.{s[:4]}" if s else ""
@@ -1830,7 +1938,9 @@ async def main():
     app.add_routes([web.get("/api/catalog", catalog), web.get("/api/me", me), web.post("/api/lang", lang), web.post("/api/order", order),
                     web.post("/api/topup", topup), web.post("/api/receipt", receipt_api), web.get("/api/history", history), web.get("/api/top", top_api), web.get("/api/checkid", checkid), web.get("/api/admin/games", admin_games), web.get("/api/admin/users", admin_users), web.get("/api/admin/user", admin_user), web.post("/api/admin/block", admin_block),
                     web.get("/api/admin/pin", admin_pin_status), web.post("/api/admin/pin/verify", admin_pin_verify), web.post("/api/admin/pin/set", admin_pin_set),
-                    web.get("/api/admin/stats", admin_stats), web.post("/api/admin/export", admin_export), web.get("/api/admin/game", admin_game_api), web.post("/api/admin/save", admin_save), web.post("/api/admin/info", admin_info_save), web.get("/gi/{g}/{p}", info_img), web.get("/api/reviews", reviews), web.route("OPTIONS", "/{p:.*}", lambda r: web.Response()),
+                    web.get("/api/admin/stats", admin_stats), web.post("/api/admin/export", admin_export),
+                    web.get("/api/admin/alerts", admin_alerts), web.post("/api/admin/alerts/seen", admin_alert_seen),
+                    web.post("/api/admin/broadcast", admin_broadcast), web.get("/api/admin/broadcast/status", admin_broadcast_status), web.get("/api/admin/game", admin_game_api), web.post("/api/admin/save", admin_save), web.post("/api/admin/info", admin_info_save), web.get("/gi/{g}/{p}", info_img), web.get("/api/reviews", reviews), web.route("OPTIONS", "/{p:.*}", lambda r: web.Response()),
                     web.get("/", lambda r: web.FileResponse(os.path.join(HERE, "index.html")))])
     for f in ("style.css", "app.js", "i18n.js", "ru.json", "uz.json", "tg.json", "en.json", "logo.png", "splash.jpg"):
         app.router.add_get("/" + f, lambda r, f=f: web.FileResponse(os.path.join(HERE, f)))
