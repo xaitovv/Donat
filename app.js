@@ -266,20 +266,29 @@ function admLock(){
   <div id="adm_err" style="color:#f87171;margin-top:12px;min-height:18px"></div>
   ${tg&&tg.BiometricManager&&tg.BiometricManager.isBiometricAvailable?`<div id="adm_bio_row"><button class="btn" style="margin-top:16px;background:#3b3399" onclick="admBioBtn()">👤 Face ID / Touch ID</button></div>`:""}
   </div>`}
+function normDigits(s){   // ba'zi klaviaturalar fors/arab raqamlarini kiritadi (۰۱۲۳...) - ularni oddiy raqamga aylantiramiz
+  const R=[[0x0660,0x0669],[0x06F0,0x06F9],[0x0966,0x096F],[0xFF10,0xFF19]];
+  return [...String(s)].map(ch=>{const cp=ch.codePointAt(0);for(const[a,b]of R)if(cp>=a&&cp<=b)return String(cp-a);return ch}).join("")}
 async function admPinSubmit(){
-  const pin=($("#adm_pin").value||"").trim(); const err=$("#adm_err");
+  const pin=normDigits(($("#adm_pin").value||"").trim()); const err=$("#adm_err"); const btn=event&&event.target;
   if(!pin){err.textContent="PIN kiriting";return}
-  if(!/^\\d+$/.test(pin)){err.textContent="Faqat raqam kiriting";return}
-  const r=await api("/api/admin/pin/verify",{pin});
-  if(r&&r.ok){if(tg&&tg.BiometricManager&&tg.BiometricManager.isBiometricAvailable)tg.BiometricManager.updateBiometricToken(pin,()=>{});admUnlockDone();return}
-  if(r&&r.error=="nopin"){
-    if(pin.length<4){err.textContent="Birinchi marta o'rnatish: kamida 4 ta raqam kiriting";return}
-    const r2=await api("/api/admin/pin/set",{new:pin});
-    if(r2&&r2.ok){if(tg&&tg.BiometricManager&&tg.BiometricManager.isBiometricAvailable)tg.BiometricManager.updateBiometricToken(pin,()=>{});toast("PIN o'rnatildi ✅");admUnlockDone()}
-    else err.textContent=(r2&&r2.msg)||"Xato"
-    return}
-  if(r&&r.error=="locked"){err.textContent="Juda ko'p xato urinish. Birozdan so'ng qayta urining.";return}
-  err.textContent="Noto'g'ri PIN"}
+  if(!/^[0-9]+$/.test(pin)){err.textContent="Faqat raqam kiriting";return}
+  if(btn)btn.disabled=true; err.textContent="";
+  try{
+    const r=await api("/api/admin/pin/verify",{pin});
+    if(r===null){err.textContent="⚠️ Ulanishda xatolik. Qayta urining.";return}
+    if(r.error=="forbidden"){err.textContent="⚠️ Siz admin sifatida tanilmadingiz.";return}
+    if(r.ok){if(tg&&tg.BiometricManager&&tg.BiometricManager.isBiometricAvailable)tg.BiometricManager.updateBiometricToken(pin,()=>{});admUnlockDone();return}
+    if(r.error=="nopin"){
+      if(pin.length<4){err.textContent="Birinchi marta o'rnatish: kamida 4 ta raqam kiriting";return}
+      const r2=await api("/api/admin/pin/set",{new:pin});
+      if(r2===null){err.textContent="⚠️ Ulanishda xatolik. Qayta urining.";return}
+      if(r2.ok){if(tg&&tg.BiometricManager&&tg.BiometricManager.isBiometricAvailable)tg.BiometricManager.updateBiometricToken(pin,()=>{});toast("PIN o'rnatildi ✅");admUnlockDone()}
+      else err.textContent=r2.msg||"PIN o'rnatilmadi, qayta urining"
+      return}
+    if(r.error=="locked"){err.textContent="Juda ko'p xato urinish. 5 daqiqadan so'ng qayta urining.";return}
+    err.textContent="Noto'g'ri PIN"
+  } finally { if(btn)btn.disabled=false }}
 async function admBioBtn(){const err=$("#adm_err");if(await admBioTry(false))admUnlockDone();else err.textContent="Face ID/Touch ID ishlamadi, PIN kiriting"}
 async function admChangePin(){
   const old=prompt("Eski PIN:"); if(old==null)return;
