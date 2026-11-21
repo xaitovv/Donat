@@ -261,16 +261,16 @@ function admLock(){
   return `<div class="adm-wrap" style="padding:60px 20px;text-align:center">
   <div style="font-size:60px">🔒</div><h2 style="margin:10px 0 6px">Admin panel qulflangan</h2>
   <p style="color:var(--mut);margin-bottom:22px">Davom etish uchun PIN kiriting.</p>
-  <input id="adm_pin" type="password" inputmode="numeric" maxlength="8" placeholder="• • • •" style="text-align:center;letter-spacing:10px;font-size:24px;margin-bottom:14px" onkeydown="if(event.key=='Enter')admPinSubmit()">
-  <button class="btn" onclick="admPinSubmit()">Ochish</button>
+  <input id="adm_pin" type="password" inputmode="numeric" maxlength="8" placeholder="• • • •" style="text-align:center;letter-spacing:10px;font-size:24px;margin-bottom:14px" onkeydown="if(event&&event.key=='Enter')admPinSubmit()">
+  <button class="btn" onclick="admPinSubmit(this)">Ochish</button>
   <div id="adm_err" style="color:#f87171;margin-top:12px;min-height:18px"></div>
   ${tg&&tg.BiometricManager&&tg.BiometricManager.isBiometricAvailable?`<div id="adm_bio_row"><button class="btn" style="margin-top:16px;background:#3b3399" onclick="admBioBtn()">👤 Face ID / Touch ID</button></div>`:""}
   </div>`}
 function normDigits(s){   // ba'zi klaviaturalar fors/arab raqamlarini kiritadi (۰۱۲۳...) - ularni oddiy raqamga aylantiramiz
   const R=[[0x0660,0x0669],[0x06F0,0x06F9],[0x0966,0x096F],[0xFF10,0xFF19]];
   return [...String(s)].map(ch=>{const cp=ch.codePointAt(0);for(const[a,b]of R)if(cp>=a&&cp<=b)return String(cp-a);return ch}).join("")}
-async function admPinSubmit(){
-  const pin=normDigits(($("#adm_pin").value||"").trim()); const err=$("#adm_err"); const btn=event&&event.target;
+async function admPinSubmit(btn){
+  const pin=normDigits(($("#adm_pin").value||"").trim()); const err=$("#adm_err");
   if(!pin){err.textContent="PIN kiriting";return}
   if(!/^[0-9]+$/.test(pin)){err.textContent="Faqat raqam kiriting";return}
   if(btn)btn.disabled=true; err.textContent="";
