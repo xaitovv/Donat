@@ -30,7 +30,7 @@ async function init(){
   render();if(new URLSearchParams(location.search).get("go")=="hist")go("hist");setTimeout(()=>$("#splash").classList.add("hide"),Math.max(0,1500-(Date.now()-T0)))}
 function render(){
   if(S.locked)return;
-  const v=S.view,m={menu,game,topup,meth,hist,friends,set,rev,top:topv,res:resv,adm:admGuard(adm),admg:admGuard(admg),adu:admGuard(adu),adus:admGuard(adus),ads:admGuard(ads),ada:admGuard(ada),adb:admGuard(adb),pay:payv},sub=["game","topup","meth","pay","rev","res","adm","admg","adu","adus","ads","ada","adb"].includes(v);
+  const v=S.view,m={menu,game,topup,meth,hist,friends,set,rev,top:topv,res:resv,adm,admg,adu,adus,ads,ada,adb,pay:payv},sub=["game","topup","meth","pay","rev","res","adm","admg","adu","adus","ads","ada","adb"].includes(v);
   $("#app").innerHTML=m[v]();
   $("#nav").style.display=v=="res"?"none":"";
   $("#nav").innerHTML=NAV.map(([k,i,n])=>`<a class="${v==k||(k=="menu"&&sub)||(k=="friends"&&v=="top")||(k=="set"&&(v=="adm"||v=="admg"||v=="adu"||v=="adus"||v=="ads"||v=="ada"||v=="adb"))?"on":""}" onclick="go('${k}')">${I(i)}<span>${t(n)}</span></a>`).join("");
@@ -240,63 +240,6 @@ async function admUsers(reset){if(reset||!S.au)S.au=AU0();const A=S.au;const r=a
 function auSet(k,v){S.au[k]=v;admUsers()}
 const stBox=(l,v,c)=>`<div style="flex:1;min-width:130px;background:#ffffff0d;border:1px solid #ffffff14;border-radius:18px;padding:12px 14px"><small style="color:var(--mut);font-weight:700;letter-spacing:.04em">${l}</small><div style="font-size:21px;font-weight:800;margin-top:4px;color:${c||"var(--tx)"}">${v}</div></div>`;
 const uav=(x,sz)=>`<div class="av" style="position:relative;flex:none;width:${sz}px;height:${sz}px;background:hsl(${((x.name||"?").charCodeAt(0)||0)*37%360} 55% 42%)">${ini(x.name)}${avi(x.av)}</div>`;
-// ---------- ADMIN PANEL QULFI (PIN + Face ID / Touch ID) ----------
-function admOk(){return S.admUnlocked&&(Date.now()-S.admUnlocked<15*60*1000)}
-function admGuard(fn){return()=>admOk()?fn():admLock()}
-async function admBioTry(silent){
-  if(!tg||!tg.BiometricManager)return false;
-  const bm=tg.BiometricManager;
-  try{await new Promise(res=>bm.init(res))}catch(e){return false}
-  if(!bm.isBiometricAvailable)return false;
-  if(!bm.isAccessGranted){if(silent)return false;const granted=await new Promise(res=>bm.requestAccess({reason:"Admin panelni himoyalash uchun"},res));if(!granted)return false}
-  if(!bm.isBiometricTokenSaved)return false;
-  return new Promise(res=>{bm.authenticate({reason:"Admin panelni ochish"},async(ok,token)=>{
-    if(!ok||!token)return res(false);
-    const r=await api("/api/admin/pin/verify",{pin:token});
-    res(!!(r&&r.ok))})})}
-function admUnlockDone(){S.admUnlocked=Date.now();render()}
-function admLock(){
-  (async()=>{if(await admBioTry(true))admUnlockDone()})();
-  setTimeout(()=>{if(tg&&tg.BiometricManager&&tg.BiometricManager.isBiometricAvailable&&!$("#adm_bio_row"))render()},300);
-  return `<div class="adm-wrap" style="padding:60px 20px;text-align:center">
-  <div style="font-size:60px">🔒</div><h2 style="margin:10px 0 6px">Admin panel qulflangan</h2>
-  <p style="color:var(--mut);margin-bottom:22px">Davom etish uchun PIN kiriting.</p>
-  <input id="adm_pin" type="password" inputmode="numeric" maxlength="8" placeholder="• • • •" style="text-align:center;letter-spacing:10px;font-size:24px;margin-bottom:14px" onkeydown="if(event&&event.key=='Enter')admPinSubmit()">
-  <button class="btn" onclick="admPinSubmit(this)">Ochish</button>
-  <div id="adm_err" style="color:#f87171;margin-top:12px;min-height:18px"></div>
-  ${tg&&tg.BiometricManager&&tg.BiometricManager.isBiometricAvailable?`<div id="adm_bio_row"><button class="btn" style="margin-top:16px;background:#3b3399" onclick="admBioBtn()">👤 Face ID / Touch ID</button></div>`:""}
-  </div>`}
-function normDigits(s){   // ba'zi klaviaturalar fors/arab raqamlarini kiritadi (۰۱۲۳...) - ularni oddiy raqamga aylantiramiz
-  const R=[[0x0660,0x0669],[0x06F0,0x06F9],[0x0966,0x096F],[0xFF10,0xFF19]];
-  return [...String(s)].map(ch=>{const cp=ch.codePointAt(0);for(const[a,b]of R)if(cp>=a&&cp<=b)return String(cp-a);return ch}).join("")}
-async function admPinSubmit(btn){
-  const pin=normDigits(($("#adm_pin").value||"").trim()); const err=$("#adm_err");
-  if(!pin){err.textContent="PIN kiriting";return}
-  if(!/^[0-9]+$/.test(pin)){err.textContent="Faqat raqam kiriting";return}
-  if(btn)btn.disabled=true; err.textContent="";
-  try{
-    const r=await api("/api/admin/pin/verify",{pin});
-    if(r===null){err.textContent="⚠️ Ulanishda xatolik. Qayta urining.";return}
-    if(r.error=="forbidden"){err.textContent="⚠️ Siz admin sifatida tanilmadingiz.";return}
-    if(r.ok){if(tg&&tg.BiometricManager&&tg.BiometricManager.isBiometricAvailable)tg.BiometricManager.updateBiometricToken(pin,()=>{});admUnlockDone();return}
-    if(r.error=="nopin"){
-      if(pin.length<4){err.textContent="Birinchi marta o'rnatish: kamida 4 ta raqam kiriting";return}
-      const r2=await api("/api/admin/pin/set",{new:pin});
-      if(r2===null){err.textContent="⚠️ Ulanishda xatolik. Qayta urining.";return}
-      if(r2.ok){if(tg&&tg.BiometricManager&&tg.BiometricManager.isBiometricAvailable)tg.BiometricManager.updateBiometricToken(pin,()=>{});toast("PIN o'rnatildi ✅");admUnlockDone()}
-      else err.textContent=r2.msg||"PIN o'rnatilmadi, qayta urining"
-      return}
-    if(r.error=="locked"){err.textContent="Juda ko'p xato urinish. 5 daqiqadan so'ng qayta urining.";return}
-    err.textContent="Noto'g'ri PIN"
-  } finally { if(btn)btn.disabled=false }}
-async function admBioBtn(){const err=$("#adm_err");if(await admBioTry(false))admUnlockDone();else err.textContent="Face ID/Touch ID ishlamadi, PIN kiriting"}
-async function admChangePin(){
-  const old=prompt("Eski PIN:"); if(old==null)return;
-  const nw=prompt("Yangi PIN (4-8 raqam):"); if(nw==null)return;
-  const r=await api("/api/admin/pin/set",{old,new:nw});
-  if(r&&r.ok){toast("PIN yangilandi ✅");if(tg&&tg.BiometricManager&&tg.BiometricManager.isBiometricAvailable)tg.BiometricManager.updateBiometricToken(nw,()=>{})}
-  else alert((r&&r.msg)||t("err"))}
-
 // ---------- ADMIN PANEL: STATISTIKA ----------
 const AS0=()=>({period:"7",data:null});
 async function admStats(reset){if(reset||!S.as)S.as=AS0();const A=S.as;const r=await api("/api/admin/stats?period="+A.period);if(r&&r.ok){A.data=r;render()}else alert(t("err"))}
@@ -315,7 +258,7 @@ function ads(){const A=S.as||AS0();if(!A.data){admStats(true);return admBack("ad
     <button class="btn" style="flex:1;min-width:120px" onclick="admExport('30')">📥 30 kun</button>
     <button class="btn" style="flex:1;min-width:120px;background:#3b3399" onclick="admExport('all')">📥 Hammasi</button>
   </div><p style="color:var(--mut);font-size:13px;text-align:center;margin-top:8px">Fayl Telegram botdagi shaxsiy chatingizga yuboriladi. Har Dushanba ertalab o'tgan haftalik hisobot avtomatik yuboriladi.</p>
-  <button class="btn" style="margin-top:16px;background:#2a2150" onclick="admChangePin()">🔑 PIN kodni o'zgartirish</button>`}
+  `}
 async function admExport(period){toast("Tayyorlanmoqda...");const r=await api("/api/admin/export",{period});if(r&&r.ok)toast("✅ Botdagi chatingizga yuborildi");else alert((r&&r.msg)||t("err"))}
 
 // ---------- ADMIN PANEL: SHUBHALI FAOLIYAT ----------

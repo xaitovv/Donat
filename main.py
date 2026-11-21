@@ -1659,33 +1659,6 @@ async def admin_block(r):
     D.q("UPDATE users SET blocked=? WHERE id=?", (val, uid))
     return web.json_response({"ok": True, "blocked": bool(val)})
 
-# ---------- ADMIN PANEL: PIN / FACE ID QULFI ----------
-async def admin_pin_status(r):
-    if not _admin(r): return web.json_response({"error": "forbidden"}, status=403)
-    row = D.pin_get()
-    return web.json_response({"ok": True, "set": bool(row and row["pin_hash"])})
-async def admin_pin_verify(r):
-    if not _admin(r): return web.json_response({"error": "forbidden"}, status=403)
-    try: pin = str((await r.json()).get("pin", "")).strip()
-    except Exception: pin = ""
-    if not (pin.isdigit() and pin.isascii()): return web.json_response({"ok": False, "error": "bad"})
-    res = D.pin_check(pin)
-    return web.json_response({"ok": res == "ok", "error": None if res == "ok" else res})
-async def admin_pin_set(r):
-    if not _admin(r): return web.json_response({"error": "forbidden"}, status=403)
-    try: b = await r.json()
-    except Exception: b = {}
-    new = str(b.get("new", "")).strip(); old = str(b.get("old", "")).strip()
-    if not (new.isdigit() and new.isascii() and 4 <= len(new) <= 8): return web.json_response({"ok": False, "msg": "PIN 4-8 ta raqam bo'lsin"})
-    row = D.pin_get()
-    if row and row["pin_hash"]:
-        if not old: return web.json_response({"ok": False, "msg": "Eski PIN kerak"})
-        res = D.pin_check(old)
-        if res == "locked": return web.json_response({"ok": False, "msg": "Juda ko'p xato urinish, birozdan so'ng qayta urining"})
-        if res != "ok": return web.json_response({"ok": False, "msg": "Eski PIN noto'g'ri"})
-    D.pin_set(new)
-    return web.json_response({"ok": True})
-
 # ---------- ADMIN PANEL: STATISTIKA ----------
 async def admin_stats(r):
     if not _admin(r): return web.json_response({"error": "forbidden"}, status=403)
@@ -1763,12 +1736,6 @@ async def xls_worker():
             await bot.send_document(C.ADMIN_ID, BufferedInputFile(data, fname),
                                      caption=f"📊 <b>Haftalik hisobot</b>\n🧾 Bajarilgan buyurtmalar: {n}\n💰 Jami: {total:.2f} somoni", parse_mode="HTML")
         except Exception: logging.exception("xls_worker")
-@dp.message(Command("setpin"))
-async def setpin_cmd(m: Message, command: CommandObject):
-    if m.from_user.id != C.ADMIN_ID: return
-    pin = (command.args or "").strip()
-    if not (pin.isdigit() and pin.isascii() and 4 <= len(pin) <= 8): return await m.answer("Foydalanish: /setpin 123456  (4-8 ta raqam)")
-    D.pin_set(pin); await m.answer("✅ Admin panel PIN'i o'rnatildi/yangilandi.")
 @dp.message(Command("excel"))
 async def excel_cmd(m: Message, command: CommandObject):
     if m.from_user.id != C.ADMIN_ID: return
@@ -1937,7 +1904,6 @@ async def main():
     app.on_response_prepare.append(_sec)
     app.add_routes([web.get("/api/catalog", catalog), web.get("/api/me", me), web.post("/api/lang", lang), web.post("/api/order", order),
                     web.post("/api/topup", topup), web.post("/api/receipt", receipt_api), web.get("/api/history", history), web.get("/api/top", top_api), web.get("/api/checkid", checkid), web.get("/api/admin/games", admin_games), web.get("/api/admin/users", admin_users), web.get("/api/admin/user", admin_user), web.post("/api/admin/block", admin_block),
-                    web.get("/api/admin/pin", admin_pin_status), web.post("/api/admin/pin/verify", admin_pin_verify), web.post("/api/admin/pin/set", admin_pin_set),
                     web.get("/api/admin/stats", admin_stats), web.post("/api/admin/export", admin_export),
                     web.get("/api/admin/alerts", admin_alerts), web.post("/api/admin/alerts/seen", admin_alert_seen),
                     web.post("/api/admin/broadcast", admin_broadcast), web.get("/api/admin/broadcast/status", admin_broadcast_status), web.get("/api/admin/game", admin_game_api), web.post("/api/admin/save", admin_save), web.post("/api/admin/info", admin_info_save), web.get("/gi/{g}/{p}", info_img), web.get("/api/reviews", reviews), web.route("OPTIONS", "/{p:.*}", lambda r: web.Response()),
