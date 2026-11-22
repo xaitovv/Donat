@@ -734,6 +734,18 @@ async def me(r):
     u = r["u"]; n = D.q("SELECT COUNT(*) c FROM users WHERE invited_by=?", (u["id"],)).fetchone()["c"]
     b = D.q("SELECT COUNT(*) c FROM users WHERE invited_by=? AND paid=1", (u["id"],)).fetchone()["c"]
     return web.json_response({"balance": round(u["balance"], 2), "spent": round(u["spent"], 2), "lang": u["lang"], "ref": u["ref"], "refs": n, "buyers": b, "bonus": round(u["bonus"], 2), "rating": rstats(), "admin": u["id"] == C.ADMIN_ID})
+async def saved_api(r):
+    gid = str(r.query.get("game") or "")[:40]; out = []
+    for x in D.saved_ids(r["u"]["id"], gid):
+        try: f = json.loads(x["fields"] or "{}")
+        except Exception: f = {}
+        if not isinstance(f, dict) or not f: f = {"player_id": x["pid"]}
+        out.append({"pid": x["pid"], "fields": f, "region": x["region"] or "", "nick": x["nick"] or ""})
+    return web.json_response({"items": out})
+async def saved_del(r):
+    d = await r.json()
+    D.del_saved(r["u"]["id"], str(d.get("game") or "")[:40], str(d.get("pid") or "")[:80])
+    return web.json_response({"ok": True})
 async def lang(r):
     l = (await r.json()).get("lang")
     if l in ("ru", "uz", "tg", "en"): D.q("UPDATE users SET lang=?, lang_set=1 WHERE id=?", (l, r["u"]["id"]))
@@ -1505,6 +1517,8 @@ async def order(r):
     except Exception:
         logging.exception("order: admin send failed"); D.cancel_order(oid)   # pul qaytariladi
         return web.json_response({"error": "send"})
+    try: D.save_id(uid, gid, pid, fj or json.dumps(fields, ensure_ascii=False), region, nick)   # oxirgi 3 ta ID (nik bilan)
+    except Exception: logging.exception("save_id failed")
     await notify(uid, "acc", D.q("SELECT * FROM orders WHERE id=?", (oid,)).fetchone())
     asyncio.create_task(check_sus_order(uid, price))
     if sku:
@@ -1902,7 +1916,7 @@ def _img(path):
 async def main():
     app = web.Application(middlewares=[mw], client_max_size=8 * 1024 * 1024)
     app.on_response_prepare.append(_sec)
-    app.add_routes([web.get("/api/catalog", catalog), web.get("/api/me", me), web.post("/api/lang", lang), web.post("/api/order", order),
+    app.add_routes([web.get("/api/catalog", catalog), web.get("/api/me", me), web.get("/api/saved", saved_api), web.post("/api/saved/del", saved_del), web.post("/api/lang", lang), web.post("/api/order", order),
                     web.post("/api/topup", topup), web.post("/api/receipt", receipt_api), web.get("/api/history", history), web.get("/api/top", top_api), web.get("/api/checkid", checkid), web.get("/api/admin/games", admin_games), web.get("/api/admin/users", admin_users), web.get("/api/admin/user", admin_user), web.post("/api/admin/block", admin_block),
                     web.get("/api/admin/stats", admin_stats), web.post("/api/admin/export", admin_export),
                     web.get("/api/admin/alerts", admin_alerts), web.post("/api/admin/alerts/seen", admin_alert_seen),

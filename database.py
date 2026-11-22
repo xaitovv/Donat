@@ -6,6 +6,7 @@ db = sqlite3.connect("data.db", check_same_thread=False, isolation_level=None)
 db.row_factory = sqlite3.Row
 db.execute("CREATE TABLE IF NOT EXISTS adminlock(id INTEGER PRIMARY KEY CHECK(id=1), pin_hash TEXT, salt TEXT, fails INTEGER DEFAULT 0, lock_until REAL DEFAULT 0)")
 db.execute("CREATE TABLE IF NOT EXISTS alerts(id INTEGER PRIMARY KEY AUTOINCREMENT, uid INTEGER, kind TEXT, detail TEXT, ts DATETIME DEFAULT CURRENT_TIMESTAMP, seen INTEGER DEFAULT 0)")
+db.execute("CREATE TABLE IF NOT EXISTS savedids(uid INTEGER, game_id TEXT, pid TEXT, fields TEXT, region TEXT DEFAULT '', nick TEXT DEFAULT '', ts REAL, PRIMARY KEY(uid,game_id,pid))")
 for _p in ("PRAGMA journal_mode=WAL", "PRAGMA synchronous=NORMAL", "PRAGMA busy_timeout=5000"):
     try: db.execute(_p)
     except sqlite3.Error: pass
@@ -275,3 +276,20 @@ def alerts_list(limit=100, unseen_only=False):
     return q(f"SELECT * FROM alerts {w} ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
 def alerts_mark_seen(aid): q("UPDATE alerts SET seen=1 WHERE id=?", (aid,))
 def alerts_count_unseen(): return q("SELECT COUNT(*) c FROM alerts WHERE seen=0").fetchone()["c"]
+
+# ---------- Saqlangan o'yinchi ID lari (har o'yin uchun oxirgi 3 ta) ----------
+SAVED_MAX = 3
+def save_id(uid, game_id, pid, fields, region="", nick=""):
+    """Buyurtma muvaffaqiyatli o'tgach chaqiriladi. Bir xil ID qayta ishlatilsa tepaga ko'tariladi; 3 tadan ortig'i o'chadi."""
+    import time as _t
+    pid = str(pid)[:80]
+    q("INSERT INTO savedids(uid,game_id,pid,fields,region,nick,ts) VALUES(?,?,?,?,?,?,?) "
+      "ON CONFLICT(uid,game_id,pid) DO UPDATE SET fields=excluded.fields, region=excluded.region, "
+      "nick=CASE WHEN excluded.nick!='' THEN excluded.nick ELSE savedids.nick END, ts=excluded.ts",
+      (uid, game_id, pid, fields, region or "", (nick or "")[:40], _t.time()))
+    q("DELETE FROM savedids WHERE uid=? AND game_id=? AND pid NOT IN "
+      "(SELECT pid FROM savedids WHERE uid=? AND game_id=? ORDER BY ts DESC LIMIT ?)", (uid, game_id, uid, game_id, SAVED_MAX))
+def saved_ids(uid, game_id):
+    return q("SELECT pid,fields,region,nick FROM savedids WHERE uid=? AND game_id=? ORDER BY ts DESC LIMIT ?", (uid, game_id, SAVED_MAX)).fetchall()
+def del_saved(uid, game_id, pid):
+    q("DELETE FROM savedids WHERE uid=? AND game_id=? AND pid=?", (uid, game_id, str(pid)))
