@@ -733,7 +733,18 @@ async def catalog(r):
 async def me(r):
     u = r["u"]; n = D.q("SELECT COUNT(*) c FROM users WHERE invited_by=?", (u["id"],)).fetchone()["c"]
     b = D.q("SELECT COUNT(*) c FROM users WHERE invited_by=? AND paid=1", (u["id"],)).fetchone()["c"]
-    return web.json_response({"balance": round(u["balance"], 2), "spent": round(u["spent"], 2), "lang": u["lang"], "ref": u["ref"], "refs": n, "buyers": b, "bonus": round(u["bonus"], 2), "rating": rstats(), "admin": u["id"] == C.ADMIN_ID})
+    return web.json_response({"balance": round(u["balance"], 2), "spent": round(u["spent"], 2), "lang": u["lang"], "ref": u["ref"], "refs": n, "reward": reward_info(u["id"]), "buyers": b, "bonus": round(u["bonus"], 2), "rating": rstats(), "admin": u["id"] == C.ADMIN_ID})
+def reward_info(uid):
+    """Do'stlar aksiyasi holati (Mini App uchun). Mahsulot katalogda bo'lmasa aksiya yashiriladi."""
+    if not C.REWARD_ON: return None
+    try:
+        fg = next((x for x in final_catalog() if x["id"] == C.REWARD_GAME), None)
+        it = next((i for items in (fg or {}).get("tabs", {}).values() for i in items if i["id"] == C.REWARD_ITEM), None)
+        if not it: return None
+        st = D.reward_status(uid, C.REWARD_NEED, C.REWARD_NEED_PAID, C.REWARD_REPEAT)
+        return {**st, "need": C.REWARD_NEED, "game": C.REWARD_GAME, "item": C.REWARD_ITEM, "name": it["name"]}
+    except Exception:
+        logging.exception("reward_info"); return None
 async def saved_api(r):
     gid = str(r.query.get("game") or "")[:40]; out = []
     for x in D.saved_ids(r["u"]["id"], gid):
@@ -1402,7 +1413,7 @@ async def dx_place(oid, price, sku, fields, qty=None):
         if cfg_rate():
             try: cost = float(prod.get("price_usd")) * (qty or 1) * cfg_rate()
             except Exception: cost = None
-            if cost is not None and cost > price:
+            if cost is not None and price > 0 and cost > price:   # bepul (aksiya) buyurtmada tannarx tekshirilmaydi
                 return await dx_manual(oid, f"tannarx {cost:.2f} somoni sotuv narxidan ({price:g}) yuqori")
         key = f"diavex-{oid}"   # bir xil kalit: qayta urinishda pul ikki marta yechilmaydi
         for n in range(len(DX_RETRY) + 1):
@@ -1454,6 +1465,10 @@ async def dx_worker():
 async def order(r):
     d = await r.json(); uid = r["u"]["id"]; tg = r["tg"]
     gid = str(d.get("game") or ""); iid = str(d.get("item") or "")
+    rw = bool(d.get("reward"))   # do'stlar aksiyasi: bepul 110 💎
+    if rw:
+        if not C.REWARD_ON: return web.json_response({"error": "bad"})
+        gid, iid = C.REWARD_GAME, C.REWARD_ITEM   # mahsulot faqat serverdan (mijoz almashtira olmaydi)
     fg = next((x for x in final_catalog() if x["id"] == gid), None)   # admin o'zgartirishlari bilan (narx, yashirin mahsulot)
     if not fg: return web.json_response({"error": "bad"})
     stars = bool(fg.get("stars")) and fg["stars"]["id"] == iid
@@ -1503,8 +1518,12 @@ async def order(r):
         st, nick = ("unv", "") if fg.get("clan") else await check_id(gid, pid, rr)   # ID ni server o'zi tekshiradi (klan ID ni tekshirib bo'lmaydi)
         if st == "noid": return web.json_response({"error": "noid"})
         sku = dx_resolve(iid, rr); fields = {"player_id": pid}   # Donatix'ga bog'langan bo'lsa avto
-    oid = D.buy(uid, f"{gname} {product}", pid, price, gname, iname, fj, qty)  # narx serverdan olinadi
+    if rw:
+        if stars or fg.get("clan"): return web.json_response({"error": "bad"})
+        price = 0.0; iname = "🎁 " + iname; product = "🎁 " + product
+    oid = D.buy(uid, f"{gname} {product}", pid, price, gname, iname, fj, qty, reward=((C.REWARD_NEED, C.REWARD_NEED_PAID, C.REWARD_REPEAT) if rw else None))  # narx serverdan olinadi
     if oid == -1: return web.json_response({"error": "pending"})
+    if oid == -3: return web.json_response({"error": "noreward"})   # sovg'a yo'q yoki allaqachon olingan
     if oid == -2: return web.json_response({"error": "busy"})   # takroriy so'rov: birinchisi allaqachon o'tgan
     if not oid: return web.json_response({"error": "funds", "need": price, "balance": round(D.user(uid)["balance"], 2)})
     if nick: D.q("UPDATE orders SET nick=? WHERE id=?", (nick, oid))
@@ -1523,7 +1542,7 @@ async def order(r):
     asyncio.create_task(check_sus_order(uid, price))
     if sku:
         t = asyncio.create_task(dx_place(oid, price, sku, fields, qty if stars else None)); TASKS.add(t); t.add_done_callback(TASKS.discard)
-    return web.json_response({"ok": True, "balance": round(D.user(uid)["balance"], 2), "price": price, "game": gname, "item": iname, "nick": nick})
+    return web.json_response({"ok": True, "balance": round(D.user(uid)["balance"], 2), "price": price, "game": gname, "item": iname, "nick": nick, "reward": rw})
 
 async def topup(r):
     d = await r.json()

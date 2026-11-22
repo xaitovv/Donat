@@ -101,3 +101,11 @@ REQ_CHANNELS = _channels()
 
 # «Buyurtmalar» tugmasi ochadigan kanal: ORDERS_URL bo'lmasa ORDERS_CHANNEL (@kanal) dan olinadi
 ORDERS_URL = _url(os.getenv("ORDERS_URL", "")) or (_url(ORDERS_CHANNEL) if ORDERS_CHANNEL.startswith("@") else "")
+
+# ---------- Do'stlar aksiyasi: N ta do'st taklif qilsa — bepul mahsulot ----------
+REWARD_ON = os.getenv("REWARD_ON", "1") != "0"                      # 0 qilsangiz aksiya o'chadi
+REWARD_NEED = int(os.getenv("REWARD_NEED", "10") or 10)             # nechta do'st kerak
+REWARD_GAME = os.getenv("REWARD_GAME", "freefire")                  # bepul beriladigan o'yin (catalog id)
+REWARD_ITEM = os.getenv("REWARD_ITEM", "ff0")                       # bepul mahsulot (110 💎)
+REWARD_REPEAT = os.getenv("REWARD_REPEAT", "1") != "0"              # 1: har 10 ta do'st = 1 sovg'a; 0: faqat bir marta
+REWARD_NEED_PAID = os.getenv("REWARD_NEED_PAID", "0") == "1"        # 1: faqat kamida bir marta to'lov qilgan do'stlar hisoblanadi (soxta akkauntlardan himoya)

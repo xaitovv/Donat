@@ -7,6 +7,7 @@ db.row_factory = sqlite3.Row
 db.execute("CREATE TABLE IF NOT EXISTS adminlock(id INTEGER PRIMARY KEY CHECK(id=1), pin_hash TEXT, salt TEXT, fails INTEGER DEFAULT 0, lock_until REAL DEFAULT 0)")
 db.execute("CREATE TABLE IF NOT EXISTS alerts(id INTEGER PRIMARY KEY AUTOINCREMENT, uid INTEGER, kind TEXT, detail TEXT, ts DATETIME DEFAULT CURRENT_TIMESTAMP, seen INTEGER DEFAULT 0)")
 db.execute("CREATE TABLE IF NOT EXISTS savedids(uid INTEGER, game_id TEXT, pid TEXT, fields TEXT, region TEXT DEFAULT '', nick TEXT DEFAULT '', ts REAL, PRIMARY KEY(uid,game_id,pid))")
+db.execute("CREATE TABLE IF NOT EXISTS rewards(id INTEGER PRIMARY KEY AUTOINCREMENT, uid INTEGER, oid INTEGER, ts DATETIME DEFAULT CURRENT_TIMESTAMP)")
 for _p in ("PRAGMA journal_mode=WAL", "PRAGMA synchronous=NORMAL", "PRAGMA busy_timeout=5000"):
     try: db.execute(_p)
     except sqlite3.Error: pass
@@ -68,7 +69,7 @@ def _pending(uid, kind):
     return db.execute("SELECT COUNT(*) FROM orders WHERE uid=? AND status IN ('pending','processing')", (uid,)).fetchone()[0]
 def has_pending(uid, kind="topup"):
     with _l: return _pending(uid, kind) >= (MAX_TOPUPS if kind == "topup" else MAX_ORDERS)
-def buy(uid, title, pid, price, game="", item="", fields="", qty=1):
+def buy(uid, title, pid, price, game="", item="", fields="", qty=1, reward=None):
     """Atomik: -1 = tasdiqlanmagan so'rov bor, -2 = xuddi shu buyurtma hozirgina berilgan, None = mablag' yetarli emas, aks holda buyurtma raqami."""
     with _l:
         db.execute("BEGIN IMMEDIATE")
@@ -76,11 +77,16 @@ def buy(uid, title, pid, price, game="", item="", fields="", qty=1):
             db.execute("ROLLBACK"); return -1
         if db.execute("SELECT 1 FROM orders WHERE uid=? AND title=? AND pid=? AND price=? AND status!='cancelled' AND ts > datetime('now','-15 seconds')", (uid, title, pid, price)).fetchone():
             db.execute("ROLLBACK"); return -2   # xuddi shu buyurtma hozirgina yuborilgan (ikki marta bosish / VPN takrori)
+        if reward:   # do'stlar aksiyasi: bepul buyurtma (qulf ichida, ikki marta olib bo'lmaydi)
+            if _rw(uid, *reward)["avail"] <= 0:
+                db.execute("ROLLBACK"); return -3
+            price = 0.0
         r = db.execute("UPDATE users SET balance=balance-?,spent=spent+? WHERE id=? AND balance>=?", (price, price, uid, price))
         if r.rowcount == 0:
             db.execute("ROLLBACK"); return None
         oid = db.execute("INSERT INTO orders(uid,title,pid,price,game,item,dx_fields,qty) VALUES(?,?,?,?,?,?,?,?)", (uid, title, pid, price, game, item, fields, qty)).lastrowid
-        db.execute("INSERT INTO fin(uid,title,amount) VALUES(?,?,?)", (uid, title, -price))
+        if price: db.execute("INSERT INTO fin(uid,title,amount) VALUES(?,?,?)", (uid, title, -price))
+        if reward: db.execute("INSERT INTO rewards(uid,oid) VALUES(?,?)", (uid, oid))
         db.execute("COMMIT"); return oid
 def add_topup(uid, amount, method):
     """Atomik: -1 = tasdiqlanmagan so'rov bor, aks holda so'rov raqami."""
@@ -99,7 +105,7 @@ def cancel_order(oid):
             db.execute("ROLLBACK"); return None
         db.execute("UPDATE orders SET status='cancelled' WHERE id=?", (oid,))
         db.execute("UPDATE users SET balance=balance+?, spent=MAX(spent-?,0) WHERE id=?", (o["price"], o["price"], o["uid"]))
-        db.execute("INSERT INTO fin(uid,title,amount) VALUES(?,?,?)", (o["uid"], "Refund", o["price"]))
+        if o["price"]: db.execute("INSERT INTO fin(uid,title,amount) VALUES(?,?,?)", (o["uid"], "Refund", o["price"]))
         db.execute("COMMIT"); return o
 def approve_topup(tid, pct):
     """Faqat 'pending' bo'lsa — bitta to'lov ikki marta qabul qilinmaydi."""
@@ -293,3 +299,18 @@ def saved_ids(uid, game_id):
     return q("SELECT pid,fields,region,nick FROM savedids WHERE uid=? AND game_id=? ORDER BY ts DESC LIMIT ?", (uid, game_id, SAVED_MAX)).fetchall()
 def del_saved(uid, game_id, pid):
     q("DELETE FROM savedids WHERE uid=? AND game_id=? AND pid=?", (uid, game_id, str(pid)))
+
+# ---------- Do'stlar aksiyasi hisobi ----------
+def _rw(uid, need, paid_only=False, repeat=True):
+    """Qulfsiz hisob (buy() ichida ishlatiladi). have = taklif qilingan do'stlar, claimed = olingan sovg'alar
+    (bekor qilingan buyurtma hisobga olinmaydi — sovg'a qaytadi)."""
+    have = db.execute("SELECT COUNT(*) FROM users WHERE invited_by=?" + (" AND paid=1" if paid_only else ""), (uid,)).fetchone()[0]
+    claimed = db.execute("SELECT COUNT(*) FROM rewards r JOIN orders o ON o.id=r.oid WHERE r.uid=? AND o.status!='cancelled'", (uid,)).fetchone()[0]
+    need = max(1, int(need))
+    earned = have // need if repeat else min(1, have // need)
+    avail = max(0, earned - claimed)
+    done = (not repeat) and claimed >= 1
+    prog = need if (avail > 0 or done) else max(0, min(need - 1, have - claimed * need)) if repeat else min(need - 1, have)
+    return {"have": have, "claimed": claimed, "avail": avail, "prog": prog, "done": done}
+def reward_status(uid, need, paid_only=False, repeat=True):
+    with _l: return _rw(uid, need, paid_only, repeat)
