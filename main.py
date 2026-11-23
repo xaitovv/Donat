@@ -734,15 +734,27 @@ async def me(r):
     u = r["u"]; n = D.q("SELECT COUNT(*) c FROM users WHERE invited_by=?", (u["id"],)).fetchone()["c"]
     b = D.q("SELECT COUNT(*) c FROM users WHERE invited_by=? AND paid=1", (u["id"],)).fetchone()["c"]
     return web.json_response({"balance": round(u["balance"], 2), "spent": round(u["spent"], 2), "lang": u["lang"], "ref": u["ref"], "refs": n, "reward": reward_info(u["id"]), "buyers": b, "bonus": round(u["bonus"], 2), "rating": rstats(), "admin": u["id"] == C.ADMIN_ID})
+def reward_item(fg):
+    """Sovg'a mahsuloti: avval REWARD_ITEM id bo'yicha; /dxsync dan keyin id o'zgargan bo'lsa — nomida REWARD_MATCH (110) bor mahsulot
+    (REWARD_REGION afzal, bo'lmasa eng arzoni)."""
+    if not fg or fg.get("stars"): return None
+    items = [i for its in fg.get("tabs", {}).values() for i in its]
+    it = next((i for i in items if i["id"] == C.REWARD_ITEM), None)
+    if it: return it
+    if not C.REWARD_MATCH: return None
+    rx = re.compile(r"(?<!\d)" + re.escape(C.REWARD_MATCH) + r"(?!\d)")
+    cand = [i for i in items if rx.search(str(i.get("name") or ""))]
+    if not cand: return None
+    return min(cand, key=lambda i: ((i.get("region") or "").upper() != C.REWARD_REGION, i.get("price") or 0))
 def reward_info(uid):
     """Do'stlar aksiyasi holati (Mini App uchun). Mahsulot katalogda bo'lmasa aksiya yashiriladi."""
     if not C.REWARD_ON: return None
     try:
         fg = next((x for x in final_catalog() if x["id"] == C.REWARD_GAME), None)
-        it = next((i for items in (fg or {}).get("tabs", {}).values() for i in items if i["id"] == C.REWARD_ITEM), None)
+        it = reward_item(fg)
         if not it: return None
         st = D.reward_status(uid, C.REWARD_NEED, C.REWARD_NEED_PAID, C.REWARD_REPEAT)
-        return {**st, "need": C.REWARD_NEED, "game": C.REWARD_GAME, "item": C.REWARD_ITEM, "name": it["name"]}
+        return {**st, "need": C.REWARD_NEED, "game": C.REWARD_GAME, "item": it["id"], "name": it["name"]}
     except Exception:
         logging.exception("reward_info"); return None
 async def saved_api(r):
@@ -1468,9 +1480,13 @@ async def order(r):
     rw = bool(d.get("reward"))   # do'stlar aksiyasi: bepul 110 💎
     if rw:
         if not C.REWARD_ON: return web.json_response({"error": "bad"})
-        gid, iid = C.REWARD_GAME, C.REWARD_ITEM   # mahsulot faqat serverdan (mijoz almashtira olmaydi)
+        gid = C.REWARD_GAME   # mahsulot faqat serverdan (mijoz almashtira olmaydi)
     fg = next((x for x in final_catalog() if x["id"] == gid), None)   # admin o'zgartirishlari bilan (narx, yashirin mahsulot)
     if not fg: return web.json_response({"error": "bad"})
+    if rw:
+        ri = reward_item(fg)
+        if not ri: return web.json_response({"error": "noreward"})
+        iid = ri["id"]
     stars = bool(fg.get("stars")) and fg["stars"]["id"] == iid
     it = None if stars else next((i for items in fg["tabs"].values() for i in items if i["id"] == iid), None)
     if not stars and not it: return web.json_response({"error": "bad"})

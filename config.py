@@ -106,6 +106,8 @@ ORDERS_URL = _url(os.getenv("ORDERS_URL", "")) or (_url(ORDERS_CHANNEL) if ORDER
 REWARD_ON = os.getenv("REWARD_ON", "1") != "0"                      # 0 qilsangiz aksiya o'chadi
 REWARD_NEED = int(os.getenv("REWARD_NEED", "10") or 10)             # nechta do'st kerak
 REWARD_GAME = os.getenv("REWARD_GAME", "freefire")                  # bepul beriladigan o'yin (catalog id)
-REWARD_ITEM = os.getenv("REWARD_ITEM", "ff0")                       # bepul mahsulot (110 💎)
+REWARD_ITEM = os.getenv("REWARD_ITEM", "ff0")                       # bepul mahsulot (110 💎) — katalog.json dagi id
+REWARD_MATCH = os.getenv("REWARD_MATCH", "110").strip()             # Donatix katalogida id o'zgargan bo'lsa, mahsulot nomidagi shu son bo'yicha topiladi
+REWARD_REGION = os.getenv("REWARD_REGION", "CIS").strip().upper()   # bir nechta region bo'lsa, shu region tanlanadi (topilmasa — eng arzoni)
 REWARD_REPEAT = os.getenv("REWARD_REPEAT", "1") != "0"              # 1: har 10 ta do'st = 1 sovg'a; 0: faqat bir marta
 REWARD_NEED_PAID = os.getenv("REWARD_NEED_PAID", "0") == "1"        # 1: faqat kamida bir marta to'lov qilgan do'stlar hisoblanadi (soxta akkauntlardan himoya)
