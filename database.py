@@ -304,7 +304,7 @@ def del_saved(uid, game_id, pid):
 def _rw(uid, need, paid_only=False, repeat=True):
     """Qulfsiz hisob (buy() ichida ishlatiladi). have = taklif qilingan do'stlar, claimed = olingan sovg'alar
     (bekor qilingan buyurtma hisobga olinmaydi — sovg'a qaytadi)."""
-    have = db.execute("SELECT COUNT(*) FROM users WHERE invited_by=?" + (" AND paid=1" if paid_only else ""), (uid,)).fetchone()[0]
+    have = db.execute("SELECT COUNT(*) FROM users WHERE invited_by=? AND COALESCE(phone,'')!=''" + (" AND paid=1" if paid_only else ""), (uid,)).fetchone()[0]
     claimed = db.execute("SELECT COUNT(*) FROM rewards r JOIN orders o ON o.id=r.oid WHERE r.uid=? AND o.status!='cancelled'", (uid,)).fetchone()[0]
     need = max(1, int(need))
     earned = have // need if repeat else min(1, have // need)

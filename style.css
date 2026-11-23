@@ -124,3 +124,4 @@ textarea{width:100%;background:var(--bg);border:1px solid var(--line);border-rad
 .rvadm *{pointer-events:none}
 .rvadm::after{content:"";position:absolute;left:0;top:0;bottom:0;width:0;background:linear-gradient(90deg,#ef444400,#ef444466);border-right:3px solid #ef4444;pointer-events:none}
 .rvadm.hold::after{width:100%;transition:width 3s linear}
+.rwnote{margin-top:8px;font-size:13px;font-weight:600;opacity:.9}

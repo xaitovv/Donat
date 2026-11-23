@@ -215,9 +215,18 @@ async def got_contact(m: Message):
     await m.answer(_PH[l]["ok"], reply_markup=ReplyKeyboardRemove())
     if await gate(m.chat.id, uid, l): await welcome(m.chat.id, l)
 
+async def check_sus_ref(inv):
+    """Bir taklif qiluvchiga 1 soat ichida 5+ yangi akkaunt kirsa — soxta 'do'stlar' bo'lishi mumkin."""
+    try:
+        n = D.q("SELECT COUNT(*) c FROM users WHERE invited_by=? AND joined > datetime('now','-1 hour')", (inv,)).fetchone()["c"]
+        if n >= 5 and not D.q("SELECT 1 FROM alerts WHERE uid=? AND kind='ref' AND ts > datetime('now','-1 hour')", (inv,)).fetchone():
+            r = f"1 soat ichida {n} ta yangi akkaunt uning taklif havolasi orqali kirdi (soxta 'do'stlar' bo'lishi mumkin)"
+            D.alert_add(inv, "ref", r); await notify_alert(inv, r)
+    except Exception: logging.exception("check_sus_ref")
 @dp.message(CommandStart())
 async def start(m: Message, command: CommandObject):
     u = D.user(m.from_user.id, m.from_user.full_name, command.args)
+    if command.args and u["invited_by"]: await check_sus_ref(u["invited_by"])
     if not u["lang_set"]: return await m.answer(PICK, reply_markup=picker())
     await proceed(m.chat.id, m.from_user.id, u["lang"])
 
@@ -362,6 +371,15 @@ async def done(c: CallbackQuery):
         o = D.q("SELECT * FROM orders WHERE id=?", (oid,)).fetchone()
         await notify(o["uid"], "done", o); await post_channel(o["id"])
     await c.message.edit_reply_markup(); await c.answer("OK")
+
+@dp.callback_query(F.data.regexp(r"^okw\d+$"))
+async def ok_warn(c: CallbackQuery):
+    if c.from_user.id != C.ADMIN_ID: return await c.answer()
+    tid = c.data[3:]
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✅ Ha, bankda tekshirdim — tasdiqlayman", callback_data=f"ok{tid}")], [InlineKeyboardButton(text="❌ Rad etish", callback_data=f"no{tid}")]])
+    await c.answer("⚠️ AI bu chekni shubhali topdi. Pulni bank ilovangizda ko'rdingizmi?", show_alert=True)
+    try: await c.message.edit_reply_markup(reply_markup=kb)
+    except Exception: pass
 
 @dp.callback_query(F.data.regexp(r"^rt\d+_[1-5]$"))
 async def rate(c: CallbackQuery):
@@ -647,9 +665,17 @@ def check_init(raw: str):
     except Exception: return None
 
 hits = {}; whits = {}; bad_auth = {}; cat_hits = {}
+def client_ip(req):
+    """X-Forwarded-For ning OXIRIDAN (bizning proksi qo'shgan) qiymat. Birinchi qiymatni mijoz o'zi yozishi mumkin, shuning uchun unga ishonilmaydi."""
+    xs = [x.strip() for x in req.headers.get("X-Forwarded-For", "").split(",") if x.strip()]
+    ip = xs[-C.PROXY_HOPS] if len(xs) >= C.PROXY_HOPS else (xs[0] if xs else (req.remote or "?"))
+    return ip[:45]
 def _rl(store, k, lim):
     now = time.time()
-    if len(store) > 20000: store.clear()   # xotira to'lib ketmasin
+    if len(store) > 20000:   # xotira to'lib ketmasin: avval eskilarni, kerak bo'lsa eng eski yarmini o'chiramiz (hammaning cheklovini nolga tushirmaymiz)
+        for kk in [kk for kk, v in store.items() if not v or now - v[-1] >= 60]: store.pop(kk, None)
+        if len(store) > 20000:
+            for kk in sorted(store, key=lambda z: store[z][-1])[:10000]: store.pop(kk, None)
     store[k] = [x for x in store.get(k, []) if now - x < 60] + [now]
     return len(store[k]) > lim
 
@@ -686,12 +712,12 @@ async def mw(req, handler):
         if req.method == "OPTIONS": r = web.Response()
         else:
             if req.path == "/api/catalog":   # ro'yxatdan o'tmagan ham ochadi, shuning uchun IP bo'yicha cheklanadi (bepul DoS yo'li bo'lmasin)
-                ip = (req.headers.get("X-Forwarded-For", "").split(",")[0].strip() or req.remote or "?")[:45]
+                ip = client_ip(req)
                 if _rl(cat_hits, ip, 90): return web.json_response({"error": "rate"}, status=429, headers=cors())
             if req.path.startswith("/api/") and req.path != "/api/catalog":
                 u = check_init(req.headers.get("X-Init", ""))
                 if not u:
-                    ip = (req.headers.get("X-Forwarded-For", "").split(",")[0].strip() or req.remote or "?")[:45]
+                    ip = client_ip(req)
                     if _rl(bad_auth, ip, 40): return web.json_response({"error": "rate"}, status=429, headers=cors())   # soxta initData bilan urinishlar
                     return web.json_response({"error": "auth"}, status=401, headers=cors())
                 req["u"] = D.user(u["id"], u.get("first_name", "")); req["tg"] = u
@@ -755,7 +781,7 @@ def reward_info(uid):
         it = reward_item(fg)
         if not it: return None
         st = D.reward_status(uid, C.REWARD_NEED, C.REWARD_NEED_PAID, C.REWARD_REPEAT)
-        return {**st, "need": C.REWARD_NEED, "game": C.REWARD_GAME, "item": it["id"], "name": it["name"]}
+        return {**st, "need": C.REWARD_NEED, "game": C.REWARD_GAME, "item": it["id"], "name": it["name"], "need_paid": bool(C.REWARD_NEED_PAID)}
     except Exception:
         logging.exception("reward_info"); return None
 async def saved_api(r):
@@ -1607,6 +1633,8 @@ async def rcpt_ai_task(tid, msg_id, cap, kb, raw, want, value):
                 else: D.rhash_add(fp, tid)
         except Exception: logging.exception("receipt dup check")
         t = D.q("SELECT status FROM topups WHERE id=?", (tid,)).fetchone()
+        if "shubhali" in txt.split("\n")[0] or "DIQQAT" in txt:   # shubhali chek: ✅ bosilganda yana bir bor so'raladi
+            kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⚠️ Shubhali — tasdiqlash", callback_data=f"okw{tid}"), InlineKeyboardButton(text="❌ Rad etish", callback_data=f"no{tid}")]])
         await bot.edit_message_caption(chat_id=C.ADMIN_ID, message_id=msg_id, caption=cap + "\n\n" + txt, parse_mode="HTML", reply_markup=kb if (t and t["status"] == "pending") else None)
     except Exception: logging.exception("rcpt_ai_task")
 async def receipt_api(r):
@@ -1713,7 +1741,7 @@ async def admin_block(r):
 async def admin_stats(r):
     if not _admin(r): return web.json_response({"error": "forbidden"}, status=403)
     pr = r.query.get("period", "7")
-    days = None if pr == "all" else max(1, min(int(pr), 3650)) if pr.isdigit() else 7
+    days = None if pr == "all" else max(1, min(int(pr), 3650)) if (pr.isascii() and pr.isdigit()) else 7
     w = f"AND ts > datetime('now','-{days} days')" if days else ""
     chart_days = days if (days and days <= 60) else 30
     rowsd = D.q(f"SELECT date(ts) d, COALESCE(SUM(price),0) s, COUNT(*) c FROM orders WHERE status='done' AND ts > datetime('now','-{chart_days} days') GROUP BY date(ts)").fetchall()
@@ -1764,7 +1792,7 @@ async def admin_export(r):
     try: b = await r.json()
     except Exception: b = {}
     pr = str(b.get("period", "7"))
-    days = None if pr == "all" else max(1, min(int(pr), 3650)) if pr.isdigit() else 7
+    days = None if pr == "all" else max(1, min(int(pr), 3650)) if (pr.isascii() and pr.isdigit()) else 7
     try: data, n, total = build_orders_xlsx(days)
     except Exception:
         logging.exception("excel export"); return web.json_response({"ok": False, "msg": "Excel yaratishda xato"})
@@ -1910,6 +1938,11 @@ async def admin_review_delete(r):
     except Exception: oid = 0
     n = D.q("UPDATE ratings SET hid=1 WHERE oid=?", (oid,)).rowcount   # yashiriladi (qayta baholab bo'lmasligi uchun qator saqlanadi)
     return web.json_response({"ok": bool(n)})
+def _top_name(n):
+    w = (n or "").strip().split()
+    n = w[0] if w else "?"
+    if not C.TOP_MASK: return n[:20]
+    return (n[:2] if len(n) > 2 else n[:1]) + "***"
 async def top_api(r):
     kind = r.query.get("kind", "donors"); cut = {"week": "-7 days", "month": "-30 days"}.get(r.query.get("period", "week"))
     a = (cut,) if cut else ()
@@ -1919,7 +1952,7 @@ async def top_api(r):
     else:
         w = "AND o.ts >= datetime('now', ?)" if cut else ""
         rows = D.q(f"SELECT u.id uid, u.name, SUM(o.price) s FROM orders o JOIN users u ON u.id=o.uid WHERE o.status!='cancelled' {w} GROUP BY o.uid ORDER BY s DESC LIMIT 20", a)
-    return web.json_response({"items": [{"name": (x["name"] or "?")[:20], "total": round(x["s"] or 0, 2), "av": av_tok(x["uid"])} for x in rows]})
+    return web.json_response({"items": [{"name": _top_name(x["name"]), "total": round(x["s"] or 0, 2), "av": av_tok(x["uid"])} for x in rows]})
 async def history(r):
     uid = r["u"]["id"]; f = lambda x: (lambda s: f"{s[8:10]}.{s[5:7]}.{s[:4]} {s[11:16]}" if len(s) >= 16 else s)(str(x or ""))
     o = [{"id": x["id"], "title": x["title"], "price": x["price"], "status": x["status"], "date": f(x["ts"]), "game": x["game"] or "", "item": x["item"] or ""} for x in D.q("SELECT * FROM orders WHERE uid=? ORDER BY id DESC LIMIT 50", (uid,))]

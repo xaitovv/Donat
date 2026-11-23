@@ -110,4 +110,6 @@ REWARD_ITEM = os.getenv("REWARD_ITEM", "ff0")                       # bepul mahs
 REWARD_MATCH = os.getenv("REWARD_MATCH", "110").strip()             # Donatix katalogida id o'zgargan bo'lsa, mahsulot nomidagi shu son bo'yicha topiladi
 REWARD_REGION = os.getenv("REWARD_REGION", "CIS").strip().upper()   # bir nechta region bo'lsa, shu region tanlanadi (topilmasa — eng arzoni)
 REWARD_REPEAT = os.getenv("REWARD_REPEAT", "1") != "0"              # 1: har 10 ta do'st = 1 sovg'a; 0: faqat bir marta
-REWARD_NEED_PAID = os.getenv("REWARD_NEED_PAID", "0") == "1"        # 1: faqat kamida bir marta to'lov qilgan do'stlar hisoblanadi (soxta akkauntlardan himoya)
+REWARD_NEED_PAID = os.getenv("REWARD_NEED_PAID", "1") != "0"        # 1: faqat kamida bir marta to'lov qilgan do'stlar hisoblanadi (soxta akkauntlardan himoya)
+PROXY_HOPS = max(1, int(os.getenv("PROXY_HOPS", "1") or 1))          # serveringiz oldidagi proksilar soni (Render: 1). IP X-Forwarded-For ning OXIRIDAN olinadi (soxtalashtirib bo'lmaydi)
+TOP_MASK = os.getenv("TOP_MASK", "1") != "0"                         # 1: "Eng yaxshilar" ro'yxatida ism yashiriladi (Al***). 0: to'liq ism
