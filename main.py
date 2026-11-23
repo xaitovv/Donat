@@ -30,6 +30,7 @@ for _s in ("CREATE TABLE IF NOT EXISTS ratings(oid INTEGER PRIMARY KEY,uid INTEG
            "ALTER TABLE ratings ADD COLUMN text TEXT DEFAULT ''",
            "ALTER TABLE ratings ADD COLUMN reply TEXT DEFAULT ''",
            "ALTER TABLE ratings ADD COLUMN ts TEXT",
+           "ALTER TABLE ratings ADD COLUMN hid INTEGER DEFAULT 0",
            "ALTER TABLE orders ADD COLUMN dx_fields TEXT DEFAULT ''",
            "ALTER TABLE orders ADD COLUMN qty INTEGER DEFAULT 1",
            "CREATE TABLE IF NOT EXISTS dxcat(product_id TEXT PRIMARY KEY,game_id TEXT,region TEXT,region_title TEXT,name TEXT,tab TEXT,emoji TEXT,price_usd REAL,fields TEXT,kind TEXT,sort INTEGER,qmin INTEGER,qmax INTEGER,active INTEGER DEFAULT 1)",
@@ -335,7 +336,7 @@ def shop_kb(l):
     return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=W[l]["shop"], web_app=WebAppInfo(url=C.MINIAPP_URL))]])
 def rstats():
     d = {i: 0 for i in range(1, 6)}
-    for x in D.q("SELECT stars, COUNT(*) c FROM ratings GROUP BY stars"): d[x["stars"]] = x["c"]
+    for x in D.q("SELECT stars, COUNT(*) c FROM ratings WHERE COALESCE(hid,0)=0 GROUP BY stars"): d[x["stars"]] = x["c"]
     n = sum(d.values())
     return {"avg": round(sum(k * v for k, v in d.items()) / n, 1) if n else 0, "count": n, "dist": d}
 
@@ -1899,10 +1900,16 @@ async def admin_broadcast_status(r):
     if not _admin(r): return web.json_response({"error": "forbidden"}, status=403)
     return web.json_response({"ok": True, **BCAST})
 async def reviews(r):
-    rows = D.q("SELECT r.oid, r.stars, r.text, r.reply, r.ts, o.game, o.item, o.title, u.name, u.id uid FROM ratings r JOIN orders o ON o.id=r.oid JOIN users u ON u.id=r.uid ORDER BY r.oid DESC LIMIT 300").fetchall()
+    rows = D.q("SELECT r.oid, r.stars, r.text, r.reply, r.ts, o.game, o.item, o.title, u.name, u.id uid FROM ratings r JOIN orders o ON o.id=r.oid JOIN users u ON u.id=r.uid WHERE COALESCE(r.hid,0)=0 ORDER BY r.oid DESC LIMIT 300").fetchall()
     dt = lambda s: f"{s[8:10]}.{s[5:7]}.{s[:4]}" if s else ""
     items = [{"id": x["oid"], "name": (x["name"] or "?")[:20], "stars": x["stars"], "game": x["game"] or "", "item": x["item"] or x["title"], "text": x["text"] or "", "reply": x["reply"] or "", "date": dt(x["ts"]), "av": av_tok(x["uid"])} for x in rows]
     return web.json_response({**rstats(), "items": items})
+async def admin_review_delete(r):
+    if not _admin(r): return web.json_response({"error": "forbidden"}, status=403)
+    try: oid = int((await r.json()).get("id") or 0)
+    except Exception: oid = 0
+    n = D.q("UPDATE ratings SET hid=1 WHERE oid=?", (oid,)).rowcount   # yashiriladi (qayta baholab bo'lmasligi uchun qator saqlanadi)
+    return web.json_response({"ok": bool(n)})
 async def top_api(r):
     kind = r.query.get("kind", "donors"); cut = {"week": "-7 days", "month": "-30 days"}.get(r.query.get("period", "week"))
     a = (cut,) if cut else ()
@@ -1955,7 +1962,7 @@ async def main():
                     web.post("/api/topup", topup), web.post("/api/receipt", receipt_api), web.get("/api/history", history), web.get("/api/top", top_api), web.get("/api/checkid", checkid), web.get("/api/admin/games", admin_games), web.get("/api/admin/users", admin_users), web.get("/api/admin/user", admin_user), web.post("/api/admin/block", admin_block),
                     web.get("/api/admin/stats", admin_stats), web.post("/api/admin/export", admin_export),
                     web.get("/api/admin/alerts", admin_alerts), web.post("/api/admin/alerts/seen", admin_alert_seen),
-                    web.post("/api/admin/broadcast", admin_broadcast), web.get("/api/admin/broadcast/status", admin_broadcast_status), web.get("/api/admin/game", admin_game_api), web.post("/api/admin/save", admin_save), web.post("/api/admin/info", admin_info_save), web.get("/gi/{g}/{p}", info_img), web.get("/api/reviews", reviews), web.route("OPTIONS", "/{p:.*}", lambda r: web.Response()),
+                    web.post("/api/admin/broadcast", admin_broadcast), web.post("/api/admin/review/delete", admin_review_delete), web.get("/api/admin/broadcast/status", admin_broadcast_status), web.get("/api/admin/game", admin_game_api), web.post("/api/admin/save", admin_save), web.post("/api/admin/info", admin_info_save), web.get("/gi/{g}/{p}", info_img), web.get("/api/reviews", reviews), web.route("OPTIONS", "/{p:.*}", lambda r: web.Response()),
                     web.get("/", lambda r: web.FileResponse(os.path.join(HERE, "index.html")))])
     for f in ("style.css", "app.js", "i18n.js", "ru.json", "uz.json", "tg.json", "en.json", "logo.png", "splash.jpg"):
         app.router.add_get("/" + f, lambda r, f=f: web.FileResponse(os.path.join(HERE, f)))
