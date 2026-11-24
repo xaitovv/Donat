@@ -2,7 +2,7 @@ const API=""; // bir xil server
 const T0=Date.now();
 const tg=window.Telegram?.WebApp;tg?.ready();tg?.expand();
 const $=s=>document.querySelector(s);
-const S={u:{balance:0,spent:0,ref:"",refs:0,bonus:0},cat:{games:[],bot:"",support:""},tab:"games",view:"menu",game:null,sel:null,pid:"",region:"",hist:{orders:[],fin:[]},htab:"orders"};
+const S={u:{balance:0,spent:0,ref:"",refs:0,bonus:0},cat:{games:[],bot:"",support:""},tab:"games",view:"menu",game:null,sel:null,pid:"",region:"",hist:{orders:[],fin:[]},htab:"orders"};S.sup={items:[]};S.tk=null;
 const GRD=["/api/order","/api/topup","/api/receipt"],INFL={};
 const rid=()=>(crypto.randomUUID?crypto.randomUUID():Date.now()+"-"+Math.random().toString(36).slice(2));
 async function api(p,b){const g=b&&GRD.includes(p);if(g){if(INFL[p])return{error:"busy"};INFL[p]=1}   // ikki marta bosish: oldingi so'rov tugamaguncha yangisi yuborilmaydi
@@ -18,7 +18,10 @@ function lockBlocked(m){S.locked=true;$("#splash").classList.add("hide");$("#nav
 function openCh(u){if(tg&&u.includes("t.me"))tg.openTelegramLink(u);else window.open(u,"_blank")}
 async function unlock(){const s=SUBT[LANG]||SUBT.ru;const r=await api("/api/me");if(r&&!r.error){S.locked=false;$("#nav").style.display="";init()}else if(r&&r.error=="sub"){lock(r.channels);(tg?.showAlert?tg.showAlert(s[3]):alert(s[3]))}else if(r&&r.error=="phone"){const p=PHT[LANG]||PHT.ru;lockPhone();(tg?.showAlert?tg.showAlert(p[4]):alert(p[4]))}}
 const fmt=n=>(+n).toLocaleString("ru",{maximumFractionDigits:2});
-const go=async v=>{S.view=v;if(v=="hist"){const r=await api("/api/history");if(r)S.hist=r}render();scrollTo(0,0)};
+const go=async v=>{S.view=v;if(v=="hist"){const r=await api("/api/history");if(r)S.hist=r}
+  if(v=="sup"){const r=await api(S.u.admin?"/api/admin/tickets":"/api/tickets");if(r&&r.items)S.sup=r;S._me=Date.now();await refreshMe()}
+  else if(v=="menu"&&Date.now()-(S._me||0)>20000){S._me=Date.now();await refreshMe()}
+  render();scrollTo(0,0)};
 const NAV=[["menu","grid","menu"],["hist","hist","history"],["friends","users","friends"],["set","user","settings"]];
 async function init(){
   let [,me,cat]=await Promise.all([setLang(localStorage.getItem("lang")||"ru"),api("/api/me"),api("/api/catalog")]);
@@ -27,15 +30,15 @@ async function init(){
   if(me&&!me.error){S.u=me;if(me.lang&&me.lang!==LANG)await setLang(me.lang)}
   if(cat)S.cat=cat;
   if(localStorage.getItem("light"))document.body.classList.add("light");
-  render();if(new URLSearchParams(location.search).get("go")=="hist")go("hist");setTimeout(()=>$("#splash").classList.add("hide"),Math.max(0,1500-(Date.now()-T0)))}
+  render();{const q=new URLSearchParams(location.search),gq=q.get("go");if(gq=="hist")go("hist");else if(gq=="support")go("sup").then(()=>{const id=+q.get("t");if(id)openTk(id)})}setTimeout(()=>$("#splash").classList.add("hide"),Math.max(0,1500-(Date.now()-T0)))}
 function render(){
   if(S.locked)return;
-  const v=S.view,m={menu,game,topup,meth,hist,friends,set,rev,top:topv,res:resv,adm,admg,adu,adus,ads,ada,adb,pay:payv},sub=["game","topup","meth","pay","rev","res","adm","admg","adu","adus","ads","ada","adb"].includes(v);
+  const v=S.view,m={menu,game,topup,meth,hist,friends,set,rev,sup:supv,tk:tkv,top:topv,res:resv,adm,admg,adu,adus,ads,ada,adb,pay:payv},sub=["game","topup","meth","pay","rev","res","sup","tk","adm","admg","adu","adus","ads","ada","adb"].includes(v);
   $("#app").innerHTML=m[v]();
   $("#nav").style.display=v=="res"?"none":"";
   $("#nav").innerHTML=NAV.map(([k,i,n])=>`<a class="${v==k||(k=="menu"&&sub)||(k=="friends"&&v=="top")||(k=="set"&&(v=="adm"||v=="admg"||v=="adu"||v=="adus"||v=="ads"||v=="ada"||v=="adb"))?"on":""}" onclick="go('${k}')">${I(i)}<span>${t(n)}</span></a>`).join("");
   if(tg)tg.BackButton[(sub||v=="top")?"show":"hide"]()}
-tg?.BackButton.onClick(()=>go(({top:"friends",admg:"adm",adm:"set",adu:"adm",adus:"adu",ads:"adm",ada:"adm",adb:"adm"})[S.view]||"menu"));
+tg?.BackButton.onClick(()=>go(({top:"friends",tk:"sup",admg:"adm",adm:"set",adu:"adm",adus:"adu",ads:"adm",ada:"adm",adb:"adm"})[S.view]||"menu"));
 const bdg=g=>g.dx?'<b class="bdg a">AUTO</b>':g.new?'<b class="bdg n">NEW</b>':"";
 const iu=id=>String(id).startsWith("g_")?`/ico/${id}`:`/${id}.png?v=6`;
 const gi=g=>`<img class="gimg" src="${iu(g.id)}" onerror="this.style.display='none'">`;
@@ -46,7 +49,7 @@ function menu(){const u=S.u,tgu=tg?.initDataUnsafe?.user||{};
   const body=S.tab=="games"?`<div class="grid3">${games}</div>`:S.tab=="gift"?`<div class="card">${gifts}</div>`:`<div class="grid3" style="grid-template-columns:1fr 1fr">${ai}</div>`;
   return `<div class="top"><div class="av">${tgu.photo_url?`<img src="${esc(tgu.photo_url)}">`:esc((tgu.first_name||"?")[0])}</div><div><b>${esc(tgu.first_name||"")}</b><br><small style="color:var(--mut)">${tgu.username?"@"+esc(tgu.username):""}</small></div></div>
   <div class="bal"><small>${t("balance")}</small><h2>${fmt(u.balance)} <span>${t("cur")}</span></h2>
-  <div class="row3"><div class="glass" onclick="go('topup')"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5"/><path d="M16 13.5h2"/></svg><span>${t("btn_topup")}</span></div><div class="glass" onclick="alert(t('nopromo'))"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2z"/><path d="M13 5v2"/><path d="M13 17v2"/><path d="M13 11v2"/></svg><span>${t("btn_bonus")}</span></div><div class="glass" onclick="tg&&tg.openTelegramLink('https://t.me/'+S.cat.support)"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span>${t("support")}</span></div></div></div>
+  <div class="row3"><div class="glass" onclick="go('topup')"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0 0 4h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5"/><path d="M16 13.5h2"/></svg><span>${t("btn_topup")}</span></div><div class="glass" onclick="alert(t('nopromo'))"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 9a3 3 0 0 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 0 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2z"/><path d="M13 5v2"/><path d="M13 17v2"/><path d="M13 11v2"/></svg><span>${t("btn_bonus")}</span></div><div class="glass" style="position:relative" onclick="go('sup')">${sbd(u.sup_unread)}<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span>${t("support")}</span></div></div></div>
   ${rwBanner()}
   <div class="card" style="display:flex;align-items:center;gap:14px;padding:16px 18px" onclick="openReviews()"><div class="av" style="background:#3a3320;border-radius:14px;font-size:26px">⭐</div><div style="flex:1"><b style="font-size:24px">${(u.rating&&u.rating.count)?u.rating.avg.toFixed(1):"—"}</b> <span style="color:#facc15">★★★★★</span> <small style="color:var(--mut)">· ${(u.rating&&u.rating.count)||0} ${t("ratings_n")}</small></div><span style="color:var(--mut)">›</span></div>
   <div class="seg"><a class="${S.tab=="games"?"on":""}" onclick="S.tab='games';render()">${t("games")}</a><a class="${S.tab=="gift"?"on":""}" onclick="S.tab='gift';render()">Gift Code</a><a class="${S.tab=="ai"?"on":""}" onclick="S.tab='ai';render()">🤖 AI</a></div>${body}`}
@@ -434,13 +437,13 @@ function friends(){const l=`https://t.me/${S.cat.bot}?start=${S.u.ref}`,c=(a,b)=
   ${rewardCard()}<div class="row3" style="grid-template-columns:1fr 1fr;margin-bottom:14px">${tl("trophy","#33290f","#facc15","top_donors","openTop('donors')")}${tl("wallet","#12302a","#22c993","top_topups","openTop('topups')")}</div>
   <div class="card"><div class="lbl">${t("mylink")}</div><div class="card" style="background:var(--bg);color:var(--mut);word-break:break-all;padding:14px">${l}</div><div class="flex"><button class="btn" onclick="tg&&tg.openTelegramLink('https://t.me/share/url?url='+encodeURIComponent('${l}'))">${t("send")}</button><button class="btn" style="background:var(--card2)" onclick="navigator.clipboard.writeText('${l}')">${t("copy")}</button></div></div>
   <div class="card"><b>${t("rule")}</b> <span style="float:right;background:var(--ok);color:#fff;padding:4px 12px;border-radius:20px">2%</span></div>`}
-const sup=()=>{if(tg&&S.cat.support)tg.openTelegramLink("https://t.me/"+S.cat.support)};
+
 const note=()=>modal(t("notif"),t("notif_body"),t("gotit"));
 const sec=()=>modal(t("security"),t("security_body"),t("gotit"));
 function set(){const u=S.u,tu=tg?.initDataUnsafe?.user||{},nm=esc(((tu.first_name||"")+" "+(tu.last_name||"")).trim()||"—"),light=document.body.classList.contains("light");
   const av=tu.photo_url?`<img src="${esc(tu.photo_url)}" style="width:100%;height:100%;object-fit:cover">`:ini(tu.first_name);
   const mini=(lb,val,col)=>`<div style="flex:1;background:#ffffff0d;border:1px solid #ffffff14;border-radius:18px;padding:14px 16px"><small style="color:var(--mut);font-weight:700;letter-spacing:.06em">${t(lb).toUpperCase()}</small><div style="font-size:26px;font-weight:800;margin-top:6px;color:${col}">${fmt(val)} <small style="font-size:13px;color:var(--mut);font-weight:600">${t("cur")}</small></div></div>`;
-  const rows=[["uplus","#12302a","#22c993","invite","go('friends')"],["bell","#33290f","#facc15","notif","note()"],["chat","#12303a","#38bdf8","support","sup()"],["star","#33290f","#facc15","reviews","openReviews()"],["shield","#1d2347","#8b7bff","security","sec()"]].concat(S.u.admin?[["tools","#2a2150","#a78bfa","!Admin panel (narx va mahsulotlar)","admOpen()"]]:[]).map(([ic,bg,col,k,fn])=>`<div class="mr" onclick="${fn}"><div class="ti" style="background:${bg};color:${col}">${I(ic,22)}</div><b>${k[0]=="!"?k.slice(1):t(k)}</b><span class="chv">${I("chev",20)}</span></div>`).join("");
+  const rows=[["uplus","#12302a","#22c993","invite","go('friends')"],["bell","#33290f","#facc15","notif","note()"],["chat","#12303a","#38bdf8","support","go('sup')"],["star","#33290f","#facc15","reviews","openReviews()"],["shield","#1d2347","#8b7bff","security","sec()"]].concat(S.u.admin?[["tools","#2a2150","#a78bfa","!Admin panel (narx va mahsulotlar)","admOpen()"]]:[]).map(([ic,bg,col,k,fn])=>`<div class="mr" onclick="${fn}"><div class="ti" style="background:${bg};color:${col}">${I(ic,22)}</div><b>${k[0]=="!"?k.slice(1):t(k)}</b><span class="chv">${I("chev",20)}</span></div>`).join("");
   return `<h1 style="margin:10px 0 16px">${t("profile")}</h1>
   <div class="card" style="background:linear-gradient(160deg,#171a33,#0d0f1c);padding:22px"><div class="flex" style="align-items:center;gap:16px;margin-bottom:18px"><div class="ring"><div>${av}</div></div><div style="min-width:0"><b style="font-size:20px">${nm}</b><br><small style="color:var(--mut)">${tu.username?"@"+esc(tu.username):""}</small><div class="chip" onclick="cp(${tu.id||0})">ID: ${tu.id||""} ${I("copy",14)}</div></div></div>
   <div class="flex" style="margin-bottom:16px">${mini("balance",u.balance,"var(--tx)")}${mini("spent",u.spent,"#f59a0b")}</div><button class="btn" style="background:#3b3399" onclick="go('topup')">${t("topup")}</button></div>
@@ -456,3 +459,30 @@ function topv(){const T=S.top||[],tp=S.tp||"week";
 async function chLang(l){await setLang(l);api("/api/lang",{lang:l});render()}
 init();
 setInterval(async()=>{if(S.view!="friends"||!S.u||document.hidden)return;const o=(S.u.refs||0)+"/"+((S.u.reward||{}).prog||0);await refreshMe();if(S.view=="friends"&&o!=(S.u.refs||0)+"/"+((S.u.reward||{}).prog||0))render()},15000);
+const TKS={wait:"tk_wait",new:"tk_newr",closed:"tk_closed",open:"tk_open"};
+const sbd=n=>n>0?`<b class="sbd">${n>99?"99+":n}</b>`:"";
+function supv(){const A=!!S.u.admin,L=S.sup.items||[];
+  const head=`<div class="flex" style="align-items:center;justify-content:space-between;margin:10px 0 16px"><h1>${t("support")}${A&&S.sup.unread?" "+sbd(S.sup.unread).replace('class="sbd"','class="sbd st"'):""}</h1><div class="av" style="background:var(--card);border:1px solid var(--line);color:var(--tx)" onclick="go('sup')">${I("refresh",22)}</div></div>`;
+  const nw=A?"":`<button class="btn" style="margin-bottom:14px" onclick="tkNew()">＋ ${t("tk_new")}</button>`;
+  const rows=L.map(x=>`<div class="tkc" onclick="openTk(${x.id})"><div style="flex:1;min-width:0"><div class="sm">${fdt(x.ts)}${A?" · "+esc(x.name):""}</div><b class="tr">${esc(x.last||"—")}</b><div class="sm2">#${x.id}</div></div><div style="text-align:right;flex:none"><span class="tb ${x.status}">${t(TKS[x.status])}</span>${x.unread>0?`<div>${sbd(x.unread).replace('class="sbd"','class="sbd st"')}</div>`:""}</div></div>`).join("");
+  return head+nw+(rows||`<p class="hem">${t("tk_none")}</p>`)}
+const tkMsgs=()=>{const T=S.tk,A=!!S.u.admin;return (T.msgs||[]).map(m=>{const me=A?m.f=="a":m.f=="u",who=me?"🛟 "+t("tk_you"):(A?"👤 "+esc(T.name||"—"):"🛟 "+t("tk_sup"));return `<div class="tkm ${me?"me":"ot"}"><div class="tkw">${who} · ${fdt(m.ts)}</div><div class="tkt">${esc(m.t).replace(/\n/g,"<br>")}</div></div>`}).join("")};
+function tkv(){const T=S.tk,A=!!S.u.admin,nw=!T.id;
+  return `<div class="flex" style="align-items:center;justify-content:space-between;margin:10px 0 14px"><h1>${nw?t("tk_new"):"#"+T.id}</h1>${nw?"":`<span class="tb ${T.status}">${t(TKS[T.status])}</span>`}</div>
+  ${A&&!nw?`<div class="sm" style="margin:-6px 0 12px">👤 ${esc(T.name||"—")}${T.username?" · @"+esc(T.username):""} · <code>${T.uid}</code></div>`:""}
+  <div id="tkm" class="tkl">${nw?`<p class="hem">${t("tk_intro")}</p>`:tkMsgs()}</div>
+  <textarea id="tkx" placeholder="${esc(T.closed?t("tk_ph_closed"):t("tk_ph"))}"></textarea>
+  <div class="flex" style="gap:10px"><button class="btn" id="tks" onclick="tkSend()">${t("tk_send")}</button>${A&&!nw&&!T.closed?`<button class="btn" style="background:#374151;flex:none;width:auto;padding:14px 18px" onclick="tkClose()">✅ ${t("tk_close")}</button>`:""}</div>`}
+function tkScroll(){const e=$("#tkm");if(e)e.scrollTop=e.scrollHeight}
+async function openTk(id){const r=await api((S.u.admin?"/api/admin/ticket?id=":"/api/ticket?id=")+id);if(!r||r.error)return alert(t("tk_err"));S.tk=r;S.view="tk";S._me=0;render();scrollTo(0,0);tkScroll()}
+function tkNew(){S.tk={id:0,msgs:[],status:"wait"};S.view="tk";render();scrollTo(0,0)}
+async function tkSend(){if(S.tkb)return;const x=$("#tkx"),txt=((x&&x.value)||"").trim();if(!txt)return;S.tkb=1;const b=$("#tks");if(b)b.disabled=true;
+  try{const A=!!S.u.admin,r=A?await api("/api/admin/ticket/reply",{id:S.tk.id,text:txt}):!S.tk.id?await api("/api/ticket/new",{text:txt}):await api("/api/ticket/send",{id:S.tk.id,text:txt});
+    if(!r||r.error){alert(t(r&&r.error=="limit"?"tk_limit":r&&r.error=="rate"?"tk_rate":"tk_err"));return}
+    await openTk(r.id||S.tk.id)}finally{S.tkb=0;const b2=$("#tks");if(b2)b2.disabled=false}}
+async function tkClose(){const r=await api("/api/admin/ticket/close",{id:S.tk.id});if(r&&r.ok)go("sup");else alert(t("tk_err"))}
+setInterval(async()=>{if(document.hidden||!S.u||S.locked)return;const v=S.view,A=!!S.u.admin;
+  if(v=="menu"||v=="set"){const o=S.u.sup_unread||0;await refreshMe();if((S.u.sup_unread||0)!=o&&S.view==v)render()}
+  else if(v=="sup"){const r=await api(A?"/api/admin/tickets":"/api/tickets");if(r&&r.items&&S.view=="sup"){const o=JSON.stringify(S.sup.items);S.sup=r;if(JSON.stringify(r.items)!=o)render()}}
+  else if(v=="tk"&&S.tk&&S.tk.id){const r=await api((A?"/api/admin/ticket?id=":"/api/ticket?id=")+S.tk.id);if(r&&!r.error&&S.view=="tk"&&S.tk.id==r.id&&(r.msgs.length!=S.tk.msgs.length||r.status!=S.tk.status)){S.tk=r;const e=$("#tkm");if(e){e.innerHTML=tkMsgs();tkScroll()}}}
+},12000);

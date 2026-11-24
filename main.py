@@ -78,8 +78,7 @@ def _kb(w):
     if r: rows.append(r)
     if C.CHANNEL_URL.startswith("http"): rows.append([InlineKeyboardButton(text=w["chan"], url=C.CHANNEL_URL)])
     r = [InlineKeyboardButton(text=w["lang"], callback_data="chlang")]
-    sup = (C.SUPPORT or "").strip().lstrip("@")
-    if sup: r.append(InlineKeyboardButton(text=w["sup"], url=f"https://t.me/{sup}"))
+    r.append(InlineKeyboardButton(text=w["sup"], callback_data="sup"))   # ichki yordam: admin profili ko'rsatilmaydi
     rows.append(r)
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -393,6 +392,102 @@ async def rate(c: CallbackQuery):
         await bot.send_message(C.ADMIN_ID, f"⭐ {n}/5 — #{oid}")
     await c.answer()
 
+# ---------- Yordam (murojaatlar) ----------
+SUP_T = {
+ "uz": dict(ask="💬 <b>Yordam</b>\n\nMuammo yoki savolingizni yozing — operator javob beradi.\nBekor qilish: /cancel", sent="✅ <b>Murojaatingiz qabul qilindi</b> (#{no}).\nJavob shu yerga va ilovadagi «Yordam» bo'limiga keladi.", reply="💬 <b>Yordamdan javob</b> (#{no})\n\n{text}", write="✍️ Javob yozish", open="📱 Ilovada ochish", rate="⏳ Juda tez yozyapsiz. Biroz kuting.", limit="Ochiq murojaatlaringiz juda ko'p. Avval eskilariga javob kuting."),
+ "ru": dict(ask="💬 <b>Поддержка</b>\n\nНапишите вопрос или проблему — оператор ответит.\nОтмена: /cancel", sent="✅ <b>Обращение принято</b> (#{no}).\nОтвет придёт сюда и в раздел «Поддержка» в приложении.", reply="💬 <b>Ответ поддержки</b> (#{no})\n\n{text}", write="✍️ Ответить", open="📱 Открыть в приложении", rate="⏳ Вы пишете слишком быстро. Подождите.", limit="У вас слишком много открытых обращений. Дождитесь ответа по старым."),
+ "en": dict(ask="💬 <b>Support</b>\n\nDescribe your question or problem — an operator will reply.\nCancel: /cancel", sent="✅ <b>Your request was received</b> (#{no}).\nThe reply will arrive here and in the app's Support section.", reply="💬 <b>Support reply</b> (#{no})\n\n{text}", write="✍️ Reply", open="📱 Open in app", rate="⏳ You're writing too fast. Please wait.", limit="You have too many open requests. Please wait for replies first."),
+ "tg": dict(ask="💬 <b>Дастгирӣ</b>\n\nСавол ё мушкилии худро нависед — оператор ҷавоб медиҳад.\nБекор: /cancel", sent="✅ <b>Дархости шумо қабул шуд</b> (#{no}).\nҶавоб ба ин ҷо ва ба бахши «Дастгирӣ»-и барнома меояд.", reply="💬 <b>Ҷавоби дастгирӣ</b> (#{no})\n\n{text}", write="✍️ Ҷавоб додан", open="📱 Дар барнома кушодан", rate="⏳ Шумо хеле зуд менависед. Интизор шавед.", limit="Дархостҳои кушодаи шумо хеле зиёданд. Аввал ҷавобро интизор шавед."),
+}
+TK_HITS = {}
+def _miniapp(path):
+    url = (C.MINIAPP_URL or "").strip()
+    return WebAppInfo(url=url.rstrip("/") + path) if url.startswith("https://") else None
+def tk_admin_kb(tid):
+    rows = [[InlineKeyboardButton(text="✍️ Javob", callback_data=f"sa{tid}"), InlineKeyboardButton(text="✅ Yopish", callback_data=f"sc{tid}")],
+            [InlineKeyboardButton(text="📜 Tarix", callback_data=f"sv{tid}")]]
+    wa = _miniapp(f"/?go=support&t={tid}")
+    if wa: rows[1].append(InlineKeyboardButton(text="📱 Ilovada", web_app=wa))
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+async def tk_notify_admin(tid, uid, name, txt):
+    row = D.q("SELECT username FROM users WHERE id=?", (uid,)).fetchone()
+    un = (row["username"] if row else "") or ""
+    who = f'<a href="tg://user?id={uid}">{H.escape(name or "—")}</a>' + (f" @{H.escape(un)}" if un else "") + f" · <code>{uid}</code>"
+    await admin_say(f"💬 <b>Murojaat #{tid}</b>\n👤 {who}\n\n{H.escape(txt[:3500])}", tk_admin_kb(tid))
+async def tk_notify_user(tid, uid, txt):
+    S_ = SUP_T[lang_of(uid)]
+    row = [InlineKeyboardButton(text=S_["write"], callback_data=f"sw{tid}")]
+    wa = _miniapp(f"/?go=support&t={tid}")
+    if wa: row.append(InlineKeyboardButton(text=S_["open"], web_app=wa))
+    try: await bot.send_message(uid, S_["reply"].format(no=tid, text=H.escape(txt)), parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=[row]))
+    except Exception: logging.exception("tk_notify_user")
+async def sup_text(m, kind, tid):
+    uid = m.from_user.id; txt = (m.text or "").strip()[:D.SUP_MAX_LEN]
+    if not txt: return
+    if kind == "sa":
+        if uid != C.ADMIN_ID: return
+        owner = D.tk_add(tid, "a", txt)
+        if not owner or owner == -1: return await m.answer("❌ Murojaat topilmadi")
+        await tk_notify_user(tid, owner, txt)
+        return await m.answer(f"✅ #{tid} ga yuborildi")
+    S_ = SUP_T[lang_of(uid)]
+    if is_blocked(uid): return
+    if _rl(TK_HITS, uid, 8): return await m.answer(S_["rate"])
+    D.user(uid, m.from_user.full_name)
+    if tid:
+        r = D.tk_add(tid, "u", txt, uid)
+        if r == -1: return await m.answer(S_["limit"])
+        if not r: tid = 0
+    if not tid:
+        tid = D.tk_new(uid, txt)
+        if tid == -1: return await m.answer(S_["limit"])
+    await m.answer(S_["sent"].format(no=tid), parse_mode="HTML")
+    await tk_notify_admin(tid, uid, m.from_user.full_name, txt)
+@dp.callback_query(F.data == "sup")
+async def sup_cb(c: CallbackQuery):
+    if is_blocked(c.from_user.id): return await c.answer()
+    PEND[c.from_user.id] = ("su", 0)
+    await c.message.answer(SUP_T[lang_of(c.from_user.id)]["ask"], parse_mode="HTML"); await c.answer()
+@dp.message(Command("support"))
+async def support_cmd(m: Message):
+    uid = m.from_user.id
+    if uid == C.ADMIN_ID:
+        rows = D.tk_list_admin()[:15]
+        if not rows: return await m.answer("📭 Murojaat yo'q")
+        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
+            text=("🔴" if t["a_unread"] else "✅" if t["closed"] else "⏳") + f" #{t['id']} · {(t['uname'] or '—')[:18]}" + (f" ({t['a_unread']})" if t["a_unread"] else ""),
+            callback_data=f"sv{t['id']}")] for t in rows])
+        return await m.answer(f"💬 <b>Yordam</b> — yangi xabarlar: <b>{D.tk_unread_admin()}</b>", parse_mode="HTML", reply_markup=kb)
+    if is_blocked(uid): return
+    PEND[uid] = ("su", 0); await m.answer(SUP_T[lang_of(uid)]["ask"], parse_mode="HTML")
+@dp.callback_query(F.data.regexp(r"^sw\d+$"))
+async def sup_write(c: CallbackQuery):
+    tid = int(c.data[2:])
+    if D.q("SELECT 1 FROM tickets WHERE id=? AND uid=?", (tid, c.from_user.id)).fetchone():
+        PEND[c.from_user.id] = ("su", tid)
+        await c.message.answer(SUP_T[lang_of(c.from_user.id)]["ask"], parse_mode="HTML")
+    await c.answer()
+@dp.callback_query(F.data.regexp(r"^sa\d+$"))
+async def sup_reply_cb(c: CallbackQuery):
+    if c.from_user.id != C.ADMIN_ID: return await c.answer()
+    PEND[C.ADMIN_ID] = ("sa", int(c.data[2:]))
+    await c.message.answer(f"↩ #{c.data[2:]} ga javob — matn yuboring (yoki /cancel)"); await c.answer()
+@dp.callback_query(F.data.regexp(r"^sc\d+$"))
+async def sup_close_cb(c: CallbackQuery):
+    if c.from_user.id != C.ADMIN_ID: return await c.answer()
+    ok = D.tk_close(int(c.data[2:]))
+    await c.answer("✅ Yopildi" if ok else "Allaqachon yopiq")
+    try: await c.message.edit_reply_markup()
+    except Exception: pass
+@dp.callback_query(F.data.regexp(r"^sv\d+$"))
+async def sup_view_cb(c: CallbackQuery):
+    if c.from_user.id != C.ADMIN_ID: return await c.answer()
+    tid = int(c.data[2:]); g = D.tk_get(tid)
+    if not g: return await c.answer("Topilmadi")
+    t, msgs = g
+    body = "\n\n".join(("👤 " if x["frm"] == "u" else "🛟 ") + H.escape(x["text"][:600]) for x in msgs[-8:])
+    await c.message.answer(f"📜 <b>Murojaat #{tid}</b> · {H.escape(t['uname'] or '—')} · <code>{t['uid']}</code>\n\n{body}"[:4000], parse_mode="HTML", reply_markup=tk_admin_kb(tid)); await c.answer()
+
 @dp.callback_query(F.data.regexp(r"^rv\d+$"))
 async def rv(c: CallbackQuery):
     oid = int(c.data[2:])
@@ -419,6 +514,7 @@ async def text_in(m: Message):
     p = PEND.pop(m.from_user.id, None)
     if not p: return
     kind, oid = p; uid = m.from_user.id; txt = m.text.strip()[:500]
+    if kind in ("su", "sa"): return await sup_text(m, kind, oid)
     if kind == "u":
         if D.q("UPDATE ratings SET text=? WHERE oid=? AND uid=? AND text=''", (txt, oid, uid)).rowcount:
             await m.answer(T[lang_of(uid)]["got"], parse_mode="HTML", reply_markup=shop_kb(lang_of(uid)))
@@ -754,13 +850,14 @@ async def _sec(req, resp):
 _CAT_CACHE = {"t": 0, "v": None}
 async def catalog(r):
     if time.time() - _CAT_CACHE["t"] > 3:   # 3 soniya kesh: ro'yxatdan o'tmagan oqim bazani va Telegram API'ni har safar urmasin
-        _CAT_CACHE["v"] = {**C.CATALOG, "games": public_catalog(), "bot": (await bot.me()).username, "support": C.SUPPORT, "rate": C.RATE, "pay": [{k: x[k] for k in ("id", "name", "type", "cur", "color", "icon")} for x in C.PAY]}
+        _CAT_CACHE["v"] = {**C.CATALOG, "games": public_catalog(), "bot": (await bot.me()).username, "rate": C.RATE, "pay": [{k: x[k] for k in ("id", "name", "type", "cur", "color", "icon")} for x in C.PAY]}
         _CAT_CACHE["t"] = time.time()
     return web.json_response(_CAT_CACHE["v"])
 async def me(r):
     u = r["u"]; n = D.q("SELECT COUNT(*) c FROM users WHERE invited_by=?", (u["id"],)).fetchone()["c"]
     b = D.q("SELECT COUNT(*) c FROM users WHERE invited_by=? AND paid=1", (u["id"],)).fetchone()["c"]
-    return web.json_response({"balance": round(u["balance"], 2), "spent": round(u["spent"], 2), "lang": u["lang"], "ref": u["ref"], "refs": n, "reward": reward_info(u["id"]), "buyers": b, "bonus": round(u["bonus"], 2), "rating": rstats(), "admin": u["id"] == C.ADMIN_ID})
+    return web.json_response({"balance": round(u["balance"], 2), "spent": round(u["spent"], 2), "lang": u["lang"], "ref": u["ref"], "refs": n, "reward": reward_info(u["id"]), "buyers": b, "bonus": round(u["bonus"], 2), "rating": rstats(), "admin": u["id"] == C.ADMIN_ID,
+                              "sup_unread": D.tk_unread_admin() if u["id"] == C.ADMIN_ID else D.tk_unread_user(u["id"])})
 def reward_item(fg):
     """Sovg'a mahsuloti: avval REWARD_ITEM id bo'yicha; /dxsync dan keyin id o'zgargan bo'lsa — nomida REWARD_MATCH (110) bor mahsulot
     (REWARD_REGION afzal, bo'lmasa eng arzoni)."""
@@ -804,6 +901,73 @@ async def saved_api(r):
     uid = r["u"]["id"]
     if r.query.get("all"): return web.json_response({"items": _saved_payload(uid)})
     return web.json_response({"items": _saved_payload(uid, str(r.query.get("game") or "")[:40])})
+TK_STAT = lambda t: "closed" if t["closed"] else ("new" if t["u_unread"] else ("wait" if t["last_from"] == "u" else "open"))
+def _tk_item(t, admin=False):
+    d = {"id": t["id"], "status": TK_STAT(t), "last": (t["last"] or "")[:80], "ts": int(t["upd"] or 0), "unread": t["a_unread"] if admin else t["u_unread"]}
+    if admin: d.update(uid=t["uid"], name=t["uname"] or "—", username=t["uusername"] or "")
+    return d
+def _tk_view(t, msgs, admin=False):
+    d = {"id": t["id"], "status": TK_STAT(t), "closed": bool(t["closed"]), "msgs": [{"f": x["frm"], "t": x["text"], "ts": int(x["ts"] or 0)} for x in msgs]}
+    if admin: d.update(uid=t["uid"], name=t["uname"] or "—", username=t["uusername"] or "")
+    return d
+def _tk_id(r):
+    try: return int(r.query.get("id") or 0)
+    except ValueError: return 0
+async def _tk_body(r):
+    try: d = await r.json()
+    except Exception: d = {}
+    if not isinstance(d, dict): d = {}
+    return d, str(d.get("text") or "").strip()[:D.SUP_MAX_LEN]
+async def tk_list_api(r):
+    uid = r["u"]["id"]
+    return web.json_response({"items": [_tk_item(t) for t in D.tk_list_user(uid)], "unread": D.tk_unread_user(uid)})
+async def tk_get_api(r):
+    g = D.tk_get(_tk_id(r), r["u"]["id"])
+    if not g: return web.json_response({"error": "bad"})
+    return web.json_response(_tk_view(*g))
+async def tk_new_api(r):
+    uid = r["u"]["id"]; _, txt = await _tk_body(r)
+    if not txt: return web.json_response({"error": "bad"})
+    if _rl(TK_HITS, uid, 8): return web.json_response({"error": "rate"})
+    tid = D.tk_new(uid, txt)
+    if tid == -1: return web.json_response({"error": "limit"})
+    await tk_notify_admin(tid, uid, r["u"]["name"], txt)
+    return web.json_response({"ok": True, "id": tid})
+async def tk_send_api(r):
+    uid = r["u"]["id"]; d, txt = await _tk_body(r)
+    try: tid = int(d.get("id") or 0)
+    except (TypeError, ValueError): tid = 0
+    if not txt or not tid: return web.json_response({"error": "bad"})
+    if _rl(TK_HITS, uid, 8): return web.json_response({"error": "rate"})
+    res = D.tk_add(tid, "u", txt, uid)
+    if res == -1: return web.json_response({"error": "limit"})
+    if not res: return web.json_response({"error": "bad"})
+    await tk_notify_admin(tid, uid, r["u"]["name"], txt)
+    return web.json_response({"ok": True, "id": tid})
+async def adm_tk_list(r):
+    if not _admin(r): return web.json_response({"error": "forbidden"}, status=403)
+    return web.json_response({"items": [_tk_item(t, True) for t in D.tk_list_admin()], "unread": D.tk_unread_admin()})
+async def adm_tk_get(r):
+    if not _admin(r): return web.json_response({"error": "forbidden"}, status=403)
+    g = D.tk_get(_tk_id(r))
+    if not g: return web.json_response({"error": "bad"})
+    return web.json_response(_tk_view(*g, admin=True))
+async def adm_tk_reply(r):
+    if not _admin(r): return web.json_response({"error": "forbidden"}, status=403)
+    d, txt = await _tk_body(r)
+    try: tid = int(d.get("id") or 0)
+    except (TypeError, ValueError): tid = 0
+    if not txt or not tid: return web.json_response({"error": "bad"})
+    owner = D.tk_add(tid, "a", txt)
+    if not owner or owner == -1: return web.json_response({"error": "bad"})
+    await tk_notify_user(tid, owner, txt)
+    return web.json_response({"ok": True, "id": tid})
+async def adm_tk_close(r):
+    if not _admin(r): return web.json_response({"error": "forbidden"}, status=403)
+    d, _ = await _tk_body(r)
+    try: tid = int(d.get("id") or 0)
+    except (TypeError, ValueError): tid = 0
+    return web.json_response({"ok": bool(D.tk_close(tid))})
 async def saved_del(r):
     d = await r.json()
     D.del_saved(r["u"]["id"], str(d.get("game") or "")[:40], str(d.get("pid") or "")[:80])
@@ -2003,7 +2167,9 @@ def _img(path):
 async def main():
     app = web.Application(middlewares=[mw], client_max_size=8 * 1024 * 1024)
     app.on_response_prepare.append(_sec)
-    app.add_routes([web.get("/api/catalog", catalog), web.get("/api/me", me), web.get("/api/saved", saved_api), web.post("/api/saved/del", saved_del), web.post("/api/lang", lang), web.post("/api/order", order),
+    app.add_routes([web.get("/api/catalog", catalog), web.get("/api/me", me), web.get("/api/saved", saved_api), web.post("/api/saved/del", saved_del),
+                    web.get("/api/tickets", tk_list_api), web.get("/api/ticket", tk_get_api), web.post("/api/ticket/new", tk_new_api), web.post("/api/ticket/send", tk_send_api),
+                    web.get("/api/admin/tickets", adm_tk_list), web.get("/api/admin/ticket", adm_tk_get), web.post("/api/admin/ticket/reply", adm_tk_reply), web.post("/api/admin/ticket/close", adm_tk_close), web.post("/api/lang", lang), web.post("/api/order", order),
                     web.post("/api/topup", topup), web.post("/api/receipt", receipt_api), web.get("/api/history", history), web.get("/api/top", top_api), web.get("/api/checkid", checkid), web.get("/api/admin/games", admin_games), web.get("/api/admin/users", admin_users), web.get("/api/admin/user", admin_user), web.post("/api/admin/block", admin_block),
                     web.get("/api/admin/stats", admin_stats), web.post("/api/admin/export", admin_export),
                     web.get("/api/admin/alerts", admin_alerts), web.post("/api/admin/alerts/seen", admin_alert_seen),

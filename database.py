@@ -7,6 +7,10 @@ db.row_factory = sqlite3.Row
 db.execute("CREATE TABLE IF NOT EXISTS adminlock(id INTEGER PRIMARY KEY CHECK(id=1), pin_hash TEXT, salt TEXT, fails INTEGER DEFAULT 0, lock_until REAL DEFAULT 0)")
 db.execute("CREATE TABLE IF NOT EXISTS alerts(id INTEGER PRIMARY KEY AUTOINCREMENT, uid INTEGER, kind TEXT, detail TEXT, ts DATETIME DEFAULT CURRENT_TIMESTAMP, seen INTEGER DEFAULT 0)")
 db.execute("CREATE TABLE IF NOT EXISTS savedids(uid INTEGER, game_id TEXT, pid TEXT, fields TEXT, region TEXT DEFAULT '', nick TEXT DEFAULT '', ts REAL, PRIMARY KEY(uid,game_id,pid))")
+db.execute("CREATE TABLE IF NOT EXISTS tickets(id INTEGER PRIMARY KEY AUTOINCREMENT, uid INTEGER, closed INTEGER DEFAULT 0, ts REAL, upd REAL, last_from TEXT DEFAULT 'u', u_unread INTEGER DEFAULT 0, a_unread INTEGER DEFAULT 0)")
+db.execute("CREATE TABLE IF NOT EXISTS tmsgs(id INTEGER PRIMARY KEY AUTOINCREMENT, tid INTEGER, frm TEXT, text TEXT, ts REAL)")
+db.execute("CREATE INDEX IF NOT EXISTS ix_tmsgs ON tmsgs(tid,id)")
+db.execute("CREATE INDEX IF NOT EXISTS ix_tickets_uid ON tickets(uid)")
 db.execute("CREATE TABLE IF NOT EXISTS rewards(id INTEGER PRIMARY KEY AUTOINCREMENT, uid INTEGER, oid INTEGER, ts DATETIME DEFAULT CURRENT_TIMESTAMP)")
 for _p in ("PRAGMA journal_mode=WAL", "PRAGMA synchronous=NORMAL", "PRAGMA busy_timeout=5000"):
     try: db.execute(_p)
@@ -324,3 +328,60 @@ def _rw(uid, need, paid_only=False, repeat=True):
     return {"have": have, "claimed": claimed, "avail": avail, "prog": prog, "done": done}
 def reward_status(uid, need, paid_only=False, repeat=True):
     with _l: return _rw(uid, need, paid_only, repeat)
+
+# ---------- Yordam (murojaatlar): mijoz <-> admin, admin kimligi ko'rinmaydi ----------
+SUP_MAX_OPEN = 5      # bitta mijozda bir vaqtda ochiq murojaatlar soni
+SUP_MAX_LEN = 2000
+def tk_new(uid, text):
+    """Yangi murojaat. -1 = ochiq murojaatlar juda ko'p."""
+    now = time.time()
+    with _l:
+        db.execute("BEGIN IMMEDIATE")
+        if db.execute("SELECT COUNT(*) FROM tickets WHERE uid=? AND closed=0", (uid,)).fetchone()[0] >= SUP_MAX_OPEN:
+            db.execute("ROLLBACK"); return -1
+        tid = db.execute("INSERT INTO tickets(uid,ts,upd,last_from,a_unread) VALUES(?,?,?,'u',1)", (uid, now, now)).lastrowid
+        db.execute("INSERT INTO tmsgs(tid,frm,text,ts) VALUES(?,?,?,?)", (tid, "u", text, now))
+        db.execute("COMMIT"); return tid
+def tk_add(tid, frm, text, uid=None):
+    """frm='u': murojaat egasi (uid tekshiriladi; yopiq bo'lsa qayta ochiladi). frm='a': admin.
+    Qaytaradi: murojaat egasining uid; None = topilmadi / egasi emas; -1 = ochiq murojaatlar limiti."""
+    now = time.time()
+    with _l:
+        db.execute("BEGIN IMMEDIATE")
+        t = db.execute("SELECT * FROM tickets WHERE id=?", (tid,)).fetchone()
+        if not t or (frm == "u" and t["uid"] != uid):
+            db.execute("ROLLBACK"); return None
+        if frm == "u":
+            if t["closed"] and db.execute("SELECT COUNT(*) FROM tickets WHERE uid=? AND closed=0", (uid,)).fetchone()[0] >= SUP_MAX_OPEN:
+                db.execute("ROLLBACK"); return -1
+            db.execute("UPDATE tickets SET closed=0, upd=?, last_from='u', a_unread=a_unread+1 WHERE id=?", (now, tid))
+        else:
+            db.execute("UPDATE tickets SET closed=0, upd=?, last_from='a', u_unread=u_unread+1, a_unread=0 WHERE id=?", (now, tid))
+        db.execute("INSERT INTO tmsgs(tid,frm,text,ts) VALUES(?,?,?,?)", (tid, frm, text, now))
+        db.execute("COMMIT"); return t["uid"]
+def tk_close(tid):
+    """Yopadi. Qaytaradi: egasining uid yoki None (topilmadi / allaqachon yopiq)."""
+    with _l:
+        db.execute("BEGIN IMMEDIATE")
+        t = db.execute("SELECT uid FROM tickets WHERE id=? AND closed=0", (tid,)).fetchone()
+        if not t:
+            db.execute("ROLLBACK"); return None
+        db.execute("UPDATE tickets SET closed=1, a_unread=0 WHERE id=?", (tid,))
+        db.execute("COMMIT"); return t["uid"]
+_TK_LAST = "(SELECT text FROM tmsgs WHERE tid=t.id ORDER BY id DESC LIMIT 1) AS last"
+def tk_list_user(uid):
+    return q(f"SELECT t.*, {_TK_LAST} FROM tickets t WHERE t.uid=? ORDER BY t.upd DESC LIMIT 50", (uid,)).fetchall()
+def tk_list_admin():
+    return q(f"SELECT t.*, {_TK_LAST}, u.name AS uname, u.username AS uusername FROM tickets t LEFT JOIN users u ON u.id=t.uid "
+             "ORDER BY (t.a_unread>0) DESC, t.closed ASC, t.upd DESC LIMIT 100").fetchall()
+def tk_unread_user(uid):
+    return q("SELECT COALESCE(SUM(u_unread),0) FROM tickets WHERE uid=?", (uid,)).fetchone()[0]
+def tk_unread_admin():
+    return q("SELECT COALESCE(SUM(a_unread),0) FROM tickets").fetchone()[0]
+def tk_get(tid, uid=None):
+    """(murojaat, xabarlar). uid berilsa — mijoz (faqat o'ziniki, o'qilmagan belgisi tozalanadi); uid=None — admin."""
+    t = q("SELECT t.*, u.name AS uname, u.username AS uusername FROM tickets t LEFT JOIN users u ON u.id=t.uid WHERE t.id=?", (tid,)).fetchone()
+    if not t or (uid is not None and t["uid"] != uid): return None
+    q("UPDATE tickets SET " + ("u_unread" if uid is not None else "a_unread") + "=0 WHERE id=?", (tid,))
+    msgs = q("SELECT frm, text, ts FROM (SELECT * FROM tmsgs WHERE tid=? ORDER BY id DESC LIMIT 150) ORDER BY id", (tid,)).fetchall()
+    return t, msgs
