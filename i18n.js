@@ -1,3 +1,3 @@
 let L={},LANG="ru";
-async function setLang(l){LANG=l;localStorage.setItem("lang",l);L=await (await fetch("/"+l+".json?v=7")).json()}
+async function setLang(l){LANG=l;localStorage.setItem("lang",l);L=await (await fetch("/"+l+".json?v=8")).json()}
 const t=k=>L[k]||k;

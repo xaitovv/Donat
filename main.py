@@ -784,14 +784,26 @@ def reward_info(uid):
         return {**st, "need": C.REWARD_NEED, "game": C.REWARD_GAME, "item": it["id"], "name": it["name"], "need_paid": bool(C.REWARD_NEED_PAID)}
     except Exception:
         logging.exception("reward_info"); return None
-async def saved_api(r):
-    gid = str(r.query.get("game") or "")[:40]; out = []
-    for x in D.saved_ids(r["u"]["id"], gid):
+def _saved_payload(uid, gid=None):
+    """7 kunlik ID lar + har biriga nima olinganligi."""
+    names = {g["id"]: g["name"] for g in final_catalog()}
+    out = []
+    for x in D.saved_ids(uid, gid):
+        gname = names.get(x["game_id"], "")
+        if not gname: continue   # katalogdan olib tashlangan o'yin
         try: f = json.loads(x["fields"] or "{}")
         except Exception: f = {}
         if not isinstance(f, dict) or not f: f = {"player_id": x["pid"]}
-        out.append({"pid": x["pid"], "fields": f, "region": x["region"] or "", "nick": x["nick"] or ""})
-    return web.json_response({"items": out})
+        agg = {}
+        for b in D.id_buys(uid, gname, x["pid"]):
+            n = b["item"] or b["title"] or "?"; agg[n] = agg.get(n, 0) + 1
+        out.append({"game": x["game_id"], "game_name": gname, "pid": x["pid"], "fields": f, "region": x["region"] or "", "nick": x["nick"] or "",
+                    "ts": int(x["ts"] or 0), "buys": [{"n": n, "c": c} for n, c in list(agg.items())[:6]]})
+    return out
+async def saved_api(r):
+    uid = r["u"]["id"]
+    if r.query.get("all"): return web.json_response({"items": _saved_payload(uid)})
+    return web.json_response({"items": _saved_payload(uid, str(r.query.get("game") or "")[:40])})
 async def saved_del(r):
     d = await r.json()
     D.del_saved(r["u"]["id"], str(d.get("game") or "")[:40], str(d.get("pid") or "")[:80])
@@ -1957,7 +1969,7 @@ async def history(r):
     uid = r["u"]["id"]; f = lambda x: (lambda s: f"{s[8:10]}.{s[5:7]}.{s[:4]} {s[11:16]}" if len(s) >= 16 else s)(str(x or ""))
     o = [{"id": x["id"], "title": x["title"], "price": x["price"], "status": x["status"], "date": f(x["ts"]), "game": x["game"] or "", "item": x["item"] or ""} for x in D.q("SELECT * FROM orders WHERE uid=? ORDER BY id DESC LIMIT 50", (uid,))]
     n = [{"title": x["title"], "amount": x["amount"], "date": f(x["ts"])} for x in D.q("SELECT * FROM fin WHERE uid=? ORDER BY id DESC LIMIT 50", (uid,))]
-    return web.json_response({"orders": o, "fin": n})
+    return web.json_response({"orders": o, "fin": n, "ids": _saved_payload(uid)})
 
 async def admin_info_save(r):
     if not _admin(r): return web.json_response({"error": "forbidden"}, status=403)

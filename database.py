@@ -283,20 +283,30 @@ def alerts_list(limit=100, unseen_only=False):
 def alerts_mark_seen(aid): q("UPDATE alerts SET seen=1 WHERE id=?", (aid,))
 def alerts_count_unseen(): return q("SELECT COUNT(*) c FROM alerts WHERE seen=0").fetchone()["c"]
 
-# ---------- Saqlangan o'yinchi ID lari (har o'yin uchun oxirgi 3 ta) ----------
-SAVED_MAX = 3
+# ---------- Saqlangan o'yinchi ID lari (oxirgi 7 kun) ----------
+SAVED_DAYS = 7
+SAVED_MAX = 30     # har o'yin uchun xavfsizlik chegarasi
 def save_id(uid, game_id, pid, fields, region="", nick=""):
-    """Buyurtma muvaffaqiyatli o'tgach chaqiriladi. Bir xil ID qayta ishlatilsa tepaga ko'tariladi; 3 tadan ortig'i o'chadi."""
+    """Buyurtma muvaffaqiyatli o'tgach chaqiriladi. Bir xil ID qayta ishlatilsa tepaga ko'tariladi; 7 kundan eskilari o'chadi."""
     import time as _t
     pid = str(pid)[:80]
     q("INSERT INTO savedids(uid,game_id,pid,fields,region,nick,ts) VALUES(?,?,?,?,?,?,?) "
       "ON CONFLICT(uid,game_id,pid) DO UPDATE SET fields=excluded.fields, region=excluded.region, "
       "nick=CASE WHEN excluded.nick!='' THEN excluded.nick ELSE savedids.nick END, ts=excluded.ts",
       (uid, game_id, pid, fields, region or "", (nick or "")[:40], _t.time()))
+    q("DELETE FROM savedids WHERE uid=? AND ts<?", (uid, _t.time() - SAVED_DAYS * 86400))
     q("DELETE FROM savedids WHERE uid=? AND game_id=? AND pid NOT IN "
       "(SELECT pid FROM savedids WHERE uid=? AND game_id=? ORDER BY ts DESC LIMIT ?)", (uid, game_id, uid, game_id, SAVED_MAX))
-def saved_ids(uid, game_id):
-    return q("SELECT pid,fields,region,nick FROM savedids WHERE uid=? AND game_id=? ORDER BY ts DESC LIMIT ?", (uid, game_id, SAVED_MAX)).fetchall()
+def saved_ids(uid, game_id=None):
+    """Oxirgi 7 kundagi ID lar: bitta o'yin uchun yoki (game_id=None) hamma o'yinlar bo'yicha."""
+    import time as _t
+    cut = _t.time() - SAVED_DAYS * 86400
+    if game_id:
+        return q("SELECT game_id,pid,fields,region,nick,ts FROM savedids WHERE uid=? AND game_id=? AND ts>=? ORDER BY ts DESC LIMIT ?", (uid, game_id, cut, SAVED_MAX)).fetchall()
+    return q("SELECT game_id,pid,fields,region,nick,ts FROM savedids WHERE uid=? AND ts>=? ORDER BY ts DESC LIMIT 40", (uid, cut)).fetchall()
+def id_buys(uid, game, pid):
+    """Shu ID ga oxirgi 7 kunda berilgan buyurtmalar (bekor qilinganlari hisobga olinmaydi)."""
+    return q("SELECT item,title FROM orders WHERE uid=? AND pid=? AND game=? AND status!='cancelled' AND ts>=datetime('now','-7 days') ORDER BY id DESC LIMIT 30", (uid, str(pid), game)).fetchall()
 def del_saved(uid, game_id, pid):
     q("DELETE FROM savedids WHERE uid=? AND game_id=? AND pid=?", (uid, game_id, str(pid)))
 
