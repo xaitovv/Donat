@@ -40,3 +40,11 @@ Telefon Face ID/Touch ID'ni qo'llab-quvvatlasa, shu PIN unga bog'lanadi va keyin
 Admin panel -> Statistika: bugungi/haftalik/oylik daromad, kutilayotgan buyurtma-to'lovlar, eng ko'p sotilgan o'yinlar, Excel yuklab olish tugmalari.
 Fayl har doim sizning shaxsiy Telegram chatingizga yuboriladi. Har Dushanba ertalab soat 9:00 da o'tgan haftalik hisobot o'zi yuboriladi.
 Qo'lda: botga /excel 7  yoki  /excel 30  yoki  /excel all
+
+
+## To'lov usullari
+Render -> Environment:
+- DCITY_CARD = Dushanbe City karta raqami (qo'yilsa, ro'yxatda Alif'dan tepada chiqadi)
+- DCITY_HOLDER = karta egasi ismi (ixtiyoriy, bo'lmasa CARD_HOLDER olinadi)
+- ALIF_PHONE / ALIF_HOLDER = Alif (avvalgidek)
+Ikkalasi ham bo'lsa mijozga avval DC, keyin Alif ko'rinadi. Logotip: dc.png faylini qo'shsangiz (1024x1024) chiqadi, bo'lmasa «DC» belgisi ko'rinadi.
