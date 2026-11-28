@@ -44,7 +44,6 @@ Qo'lda: botga /excel 7  yoki  /excel 30  yoki  /excel all
 
 ## To'lov usullari
 Render -> Environment:
-- DCITY_PHONE = Dushanbe City telefon raqami (qo'yilsa, ro'yxatda Alif'dan tepada, katta kartada chiqadi; eski DCITY_CARD ham ishlaydi)
+- DCITY_PHONE = Dushanbe City telefon raqami (yagona to'lov usuli; eski DCITY_CARD ham ishlaydi)
 - DCITY_HOLDER = karta egasi ismi (ixtiyoriy, bo'lmasa CARD_HOLDER olinadi)
-- ALIF_PHONE / ALIF_HOLDER = Alif (avvalgidek)
-Ikkalasi ham bo'lsa mijozga avval DC, keyin Alif ko'rinadi. Logotip: dc.png faylini qo'shsangiz (1024x1024) chiqadi, bo'lmasa «DC» belgisi ko'rinadi.
+Logotip: dc.png faylini qo'shsangiz (1024x1024) chiqadi, bo'lmasa «DC» belgisi ko'rinadi.
