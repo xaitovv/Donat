@@ -150,3 +150,12 @@ textarea{width:100%;background:var(--bg);border:1px solid var(--line);border-rad
 .tkm.me{margin-left:auto;background:#2a2470;border-color:#4a3fb0}.tkm.ot{background:var(--card);margin-right:auto}
 .tkw{font-size:12px;color:var(--mut);margin-bottom:4px}.tkt{font-size:16px;line-height:1.4;word-break:break-word}
 textarea#tkx{width:100%;box-sizing:border-box;min-height:84px;border-radius:16px;border:1px solid var(--line);background:var(--card2);color:var(--tx);padding:14px;font-size:16px;font-family:inherit;resize:vertical;margin-bottom:10px}
+
+/* To'lov usullari qatori */
+.pm{display:flex;justify-content:space-between;align-items:center;padding:14px 16px}
+.pm .av{border-radius:14px}.pm small{color:var(--mut)}.pm .pmamt{text-align:right;white-space:nowrap}.pm .pmamt b{color:#8b7bff}
+.pm.big{padding:20px 14px;border-radius:28px;border:1.5px solid #3b6fe0;background:linear-gradient(135deg,#14224a 0%,#12121c 55%,#2a1a10 100%);box-shadow:0 10px 30px #0b5fd133,inset 0 1px 0 #ffffff14;margin-bottom:16px}
+.pm.big .av{width:76px;height:76px;flex:none;border-radius:22px;box-shadow:0 6px 18px #0006}
+.pm.big .flex{gap:12px;min-width:0}.pm.big b{font-size:19px}.pm.big small{font-size:13px;display:inline-block;margin-top:4px}
+.pm.big .pmamt{font-size:14px}.pm.big .pmamt b{font-size:18px;color:#ffb066}
+body.light .pm.big{background:linear-gradient(135deg,#e6efff 0%,#fff 55%,#fff1e4 100%);border-color:#7ea6ee}

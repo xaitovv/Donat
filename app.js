@@ -178,8 +178,8 @@ function hiPk(){document.querySelectorAll(".pk[data-v]").forEach(e=>e.classList.
 function setAmt(x){S.amt=x;$("#amS").value=x;hiPk()}
 function fromS(){S.amt=+$("#amS").value||0;hiPk()}
 function toMeth(){if(!(S.amt>=10))return alert(t("min")+" 10 "+t("cur"));go("meth")}
-function meth(){const rows=(S.cat.pay||[]).map(m=>{const amt=m.cur=="RUB"?Math.round(S.amt/rate())+" ₽":fmt(S.amt)+" "+t("cur");
-  return `<div class="card" style="display:flex;justify-content:space-between;align-items:center;padding:14px 16px" onclick="pickM('${m.id}')"><div class="flex" style="align-items:center"><div class="av" style="background:${m.color};border-radius:14px;position:relative">${pi(m.id)}${m.icon}</div><div><b>${m.name}</b><br><small style="color:var(--mut)">${t(m.type=="card"?"bycard":"byphone")}</small></div></div><div style="text-align:right"><b style="color:#8b7bff">${amt}</b> ›</div></div>`}).join("");
+function meth(){const rows=(S.cat.pay||[]).map(m=>{const big=m.id=="dc";const amt=m.cur=="RUB"?Math.round(S.amt/rate())+" ₽":fmt(S.amt)+" "+t("cur");
+  return `<div class="card pm${big?" big":""}" onclick="pickM('${m.id}')"><div class="flex" style="align-items:center"><div class="av" style="background:${m.color};position:relative">${pi(m.id)}${m.icon}</div><div><b>${m.name}</b><br><small>${t(m.type=="card"?"bycard":"byphone")}</small></div></div><div class="pmamt"><b>${amt}</b> ›</div></div>`}).join("");
   return `<a style="color:#8b7bff;font-weight:600" onclick="go('topup')">‹ ${t("changeamt")}</a><div class="lbl" style="margin-top:18px">${t("paymethod")}</div>${rows||`<p style="color:var(--mut)">—</p>`}`}
 async function pickM(id){const r=await api("/api/topup",{amount:S.amt,method:id});if(r?.error=="busy")return;if(r?.ok){S.pay=r;S.file=null;go("pay")}else if(r?.error=="pending")pendModal();else alert(t("err"))}
 function payv(){const p=S.pay||{};

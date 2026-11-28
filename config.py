@@ -25,11 +25,11 @@ ALIF_PHONE = os.getenv("ALIF_PHONE", os.getenv("DC_PHONE", ""))   # eski DC_PHON
 ALIF_HOLDER = os.getenv("ALIF_HOLDER", os.getenv("DC_HOLDER", HOLDER))
 # Faqat Alif (chek bilan). Telefon ALIF_PHONE da; bo'lmasa CARD_NUMBER ishlatiladi.
 PAY = []
-# Dushanbe City (DC) kartasi - ro'yxatda Alif'dan TEPADA turadi. Render'da: DCITY_CARD, DCITY_HOLDER
-DCITY_CARD = os.getenv("DCITY_CARD", "").strip()
+# Dushanbe City (DC) - telefon raqami bilan, ro'yxatda Alif'dan TEPADA. Render'da: DCITY_PHONE, DCITY_HOLDER
+DCITY_PHONE = os.getenv("DCITY_PHONE", os.getenv("DCITY_CARD", "")).strip()   # eski DCITY_CARD ham ishlayveradi
 DCITY_HOLDER = os.getenv("DCITY_HOLDER", HOLDER)
-if DCITY_CARD:
-    PAY.append({"id": "dc", "name": "Dushanbe City", "type": "card", "value": DCITY_CARD, "holder": DCITY_HOLDER, "cur": "TJS", "color": "#0b5fd1", "icon": "DC"})
+if DCITY_PHONE:
+    PAY.append({"id": "dc", "name": "Dushanbe City", "type": "phone", "value": DCITY_PHONE, "holder": DCITY_HOLDER, "cur": "TJS", "color": "#0b5fd1", "icon": "DC"})
 if ALIF_PHONE:
     PAY.append({"id": "alif", "name": "Alif", "type": "phone", "value": ALIF_PHONE, "holder": ALIF_HOLDER, "cur": "TJS", "color": "#1aa053", "icon": "A"})
 elif CARD:
